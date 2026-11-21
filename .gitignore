@@ -23,6 +23,7 @@ config/api_keys.json.broken-*
 # ── Personal data the assistant accumulates about you ─────────────────────────
 memory/long_term.json
 memory/*.db
+config/project-briefs
 
 # ── Python build noise ────────────────────────────────────────────────────────
 __pycache__/
