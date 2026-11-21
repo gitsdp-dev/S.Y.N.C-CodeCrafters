@@ -50,33 +50,43 @@ def _nvml_gpu_windows() -> float:
         return -1.0
     try:
         import ctypes
+        import warnings
 
         class _Util(ctypes.Structure):
             _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
 
         if _nvml_lib is None:
-            for dll_name in ("nvml", r"C:\Windows\System32\nvml.dll"):
+            found = False
+            for dll_name in (r"C:\Windows\System32\nvml.dll", "nvml"):
                 try:
+                    if dll_name.startswith("C:") and not os.path.exists(dll_name):
+                        continue
                     lib = ctypes.WinDLL(dll_name)
                     lib.nvmlInit_v2()
                     _nvml_lib = lib
+                    found = True
                     break
                 except Exception:
                     continue
+            if not found:
+                _nvml_lib = False
 
-        if _nvml_lib is None:
+        if _nvml_lib and _nvml_lib is not False:
+            dev = ctypes.c_void_p()
+            _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
+            util = _Util()
+            _nvml_lib.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(util))
+            _nvml_ok = True
+            return float(util.gpu)
+
+        # Fallback to pynvml if ctypes direct load was skipped
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             import pynvml  # type: ignore
             pynvml.nvmlInit()
             h = pynvml.nvmlDeviceGetHandleByIndex(0)
             _nvml_ok = True
             return float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
-
-        dev = ctypes.c_void_p()
-        _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
-        util = _Util()
-        _nvml_lib.nvmlDeviceGetUtilizationRates(dev, ctypes.byref(util))
-        _nvml_ok = True
-        return float(util.gpu)
     except Exception:
         _nvml_ok = False
         return -1.0
@@ -155,11 +165,14 @@ class _SysMetrics:
         if self._pynvml_ok is not False:
             try:
                 if self._pynvml_h is None:
-                    import pynvml  # type: ignore
-                    pynvml.nvmlInit()
-                    self._pynvml    = pynvml
-                    self._pynvml_h  = pynvml.nvmlDeviceGetHandleByIndex(0)
-                    self._pynvml_ok = True
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        import pynvml  # type: ignore
+                        pynvml.nvmlInit()
+                        self._pynvml    = pynvml
+                        self._pynvml_h  = pynvml.nvmlDeviceGetHandleByIndex(0)
+                        self._pynvml_ok = True
                 return float(self._pynvml.nvmlDeviceGetUtilizationRates(self._pynvml_h).gpu)
             except Exception:
                 self._pynvml_ok = False
@@ -196,32 +209,18 @@ class _SysMetrics:
         # psutil — works on Linux; occasionally Windows with driver support
         try:
             temps = psutil.sensors_temperatures()
-            for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
-                         "cpu-thermal", "zenpower", "it8688"]:
-                if name in temps and temps[name]:
-                    return temps[name][0].current
-            for entries in temps.values():
-                if entries:
-                    return entries[0].current
+            if temps:
+                for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
+                             "cpu-thermal", "zenpower", "it8688"]:
+                    if name in temps and temps[name]:
+                        return temps[name][0].current
+                for entries in temps.values():
+                    if entries:
+                        return entries[0].current
         except Exception:
             pass
 
-        # Windows: wmi module (pure Python COM, zero subprocess). Reuse a single
-        # connection — building a fresh wmi.WMI() on every poll spins up a COM
-        # connection each time and is very slow. Give up after one failure.
-        if _OS == "Windows" and self._wmi_ok is not False:
-            try:
-                if self._wmi_conn is None:
-                    import wmi  # type: ignore
-                    self._wmi_conn = wmi.WMI(namespace="root/wmi")
-                tz = self._wmi_conn.MSAcpi_ThermalZoneTemperature()
-                if tz:
-                    return (tz[0].CurrentTemperature / 10.0) - 273.15
-            except Exception:
-                self._wmi_ok   = False
-                self._wmi_conn = None
-
-        return -1.0   # N/A — zero subprocess on all platforms
+        return -1.0   # N/A — zero subprocess on all platforms, completely crash-free
 
     def snapshot(self) -> dict:
         with self._lock:

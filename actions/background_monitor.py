@@ -120,7 +120,24 @@ def check_all() -> list[str]:
 
         topic = data.get("topic", slug)
         try:
-            results = _ddg_news(topic, max_results=5)
+            from actions.web_search import (
+                _detect_news_category,
+                NEWS_CATEGORIES,
+                _match_tech_outlet,
+                _is_non_tech_blocked,
+                _extract_source_name,
+            )
+
+            cat = _detect_news_category(topic)
+            site_q = NEWS_CATEGORIES.get(cat, {}).get("site_query", "")
+            tech_q = f"({topic}) AND ({site_q})" if site_q else topic
+            results = _ddg_news(tech_q, max_results=6)
+            approved = [r for r in results if not _is_non_tech_blocked(r) and _match_tech_outlet(r)]
+            if approved:
+                results = approved
+            elif not results:
+                results = _ddg_news(topic, max_results=5)
+
             if not results:
                 monitors[slug]["last_check"] = today
                 changed = True
@@ -142,11 +159,12 @@ def check_all() -> list[str]:
 
             snippet = top.get("snippet", "")[:150]
             source  = top.get("source", "")
-            parts   = [f"[MONITOR_ALERT] {topic}", f"Headline: {title}"]
+            outlet_name = _extract_source_name(top) or source
+            parts   = [f"[MONITOR_ALERT] {topic}", f"Engineering Headline: {title}"]
             if snippet:
-                parts.append(snippet)
-            if source:
-                parts.append(f"Source: {source}")
+                parts.append(f"Technical Brief: {snippet}")
+            if outlet_name:
+                parts.append(f"Source: {outlet_name}")
             alerts.append("\n".join(parts))
             print(f"[Monitor] 🔔 New headline for '{topic}': {title[:60]}")
 

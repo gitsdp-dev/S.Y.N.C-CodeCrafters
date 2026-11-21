@@ -117,6 +117,10 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
+    _repo_status_sig = pyqtSignal(object)  # thread-safe repository status updates
+    _ide_picker_sig = pyqtSignal(str, object)  # (folder_path, list_of_ides) — multi-IDE prompt
+    _ide_picker_hide_sig = pyqtSignal()        # dismiss IDE choice popup
+    _code_audit_sig = pyqtSignal(object)       # code change audit entries overlay
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -132,7 +136,7 @@ class MainWindow(QMainWindow):
         if _ui_color and _ui_color.lower() != DEFAULT_UI_COLOR:
             apply_ui_accent(_ui_color)
 
-        self.setWindowTitle(f"{_display} — {APP_VERSION}")
+        self.setWindowTitle("S.Y.N.C")
         self.setMinimumSize(_MIN_W, _MIN_H)
         self.resize(_DEFAULT_W, _DEFAULT_H)
 
@@ -362,9 +366,10 @@ class MainWindow(QMainWindow):
         self._center_split.addWidget(self._content_panel)
         self._center_split.addWidget(self._quiz_panel)
         self._center_split.setStretchFactor(0, 3)
-        self._center_split.setStretchFactor(1, 1)
+        self._center_split.setStretchFactor(1, 2)
         self._center_split.setCollapsible(0, False)
-        body.addWidget(self._center_split, stretch=5)
+        self._center_split.setCollapsible(1, False)
+        body.addWidget(self._center_split, stretch=1)
 
         self._right_panel = self._build_right_panel()
         body.addWidget(self._right_panel, stretch=0)
@@ -379,6 +384,7 @@ class MainWindow(QMainWindow):
         self._update_autostart_btn(self._check_autostart())
         from memory.config_manager import get_brief_enabled as _gbe
         self._update_brief_btn(_gbe())
+        self._refresh_repo_display()
 
         self._log._ai_name_lc = self._assistant_name.lower()
 
@@ -401,6 +407,7 @@ class MainWindow(QMainWindow):
         self._camera_sig.connect(self._show_camera_frame)
         self._confirm_sig.connect(self._show_confirm_banner)
         self._confirm_hide_sig.connect(self._hide_confirm_banner)
+        self._repo_status_sig.connect(self._handle_repo_status)
         self._cam_stream_sig.connect(self._on_cam_stream)
         self._cam_frame_sig.connect(self._on_cam_frame)
         self._wake_btns_sig.connect(self._refresh_wake_btns)
@@ -415,6 +422,9 @@ class MainWindow(QMainWindow):
         self._quiz_sig.connect(self._show_quiz)
         self._quiz_hide_sig.connect(self._hide_quiz)
         self._review_sig.connect(self._show_review)
+        self._ide_picker_sig.connect(self._show_ide_picker)
+        self._ide_picker_hide_sig.connect(self._hide_ide_picker)
+        self._code_audit_sig.connect(self._show_code_audit_overlay)
         self._cam_stop = threading.Event()
 
         # Camera preview overlay (child of central widget, positioned in resizeEvent)
@@ -899,7 +909,7 @@ class MainWindow(QMainWindow):
             sc.TargetPath       = target
             sc.Arguments        = f'"{args}"'
             sc.WorkingDirectory = work_dir
-            sc.Description      = "J.A.R.V.I.S AI Assistant"
+            sc.Description      = "S.Y.N.C"
             sc.IconLocation     = icon_loc
             sc.save()
             return
@@ -914,7 +924,7 @@ class MainWindow(QMainWindow):
             f'sc.TargetPath = "{target}"',
             f'sc.Arguments = Chr(34) & "{args}" & Chr(34)',
             f'sc.WorkingDirectory = "{work_dir}"',
-            'sc.Description = "J.A.R.V.I.S AI Assistant"',
+            'sc.Description = "S.Y.N.C"',
             f'sc.IconLocation = "{icon_loc}"',
             'sc.Save',
         ])
@@ -1025,7 +1035,7 @@ class MainWindow(QMainWindow):
         python  = Path(sys.executable)
         desktop = self._get_desktop_dir()
 
-        # Arc-reactor icon (.ico — also exported as .png for Linux/macOS)
+        # S.Y.N.C icon (.ico — also exported as .png for Linux/macOS)
         ico_path = Path(__file__).resolve().parent.parent / "config" / "sync.ico"
         if not ico_path.exists():
             self._build_sync_icon(ico_path)
@@ -1037,8 +1047,8 @@ class MainWindow(QMainWindow):
             if _os == "Windows":
                 pythonw  = python.parent / "pythonw.exe"
                 target   = str(pythonw if pythonw.exists() else python)
-                lnk      = str(desktop / "J.A.R.V.I.S.lnk")
-                icon_loc = str(ico_path) if ico_path.exists() else f"{target},0"
+                lnk      = str(desktop / "S.Y.N.C.lnk")
+                icon_loc = f"{ico_path},0" if ico_path.exists() else f"{target},0"
                 self._create_lnk_windows(lnk, target, str(script),
                                          str(script.parent), icon_loc)
 
@@ -1108,10 +1118,10 @@ class MainWindow(QMainWindow):
                         png_path = ico_path  # fallback to .ico
 
                 icon_line = f"Icon={png_path}\n" if png_path.exists() else ""
-                desk = desktop / "J.A.R.V.I.S.desktop"
+                desk = desktop / "S.Y.N.C.desktop"
                 desk.write_text(
                     "[Desktop Entry]\n"
-                    "Name=J.A.R.V.I.S\n"
+                    "Name=S.Y.N.C\n"
                     f"Exec={python} {script}\n"
                     f"Path={script.parent}\n"
                     "Type=Application\n"
@@ -1223,16 +1233,16 @@ class MainWindow(QMainWindow):
         lay.addWidget(ArcLogo())
 
         name_col = QVBoxLayout()
-        name_col.setSpacing(0)
+        name_col.setSpacing(1)
         display = self._assistant_name.upper()
         self._title_lbl = QLabel(display)
-        self._title_lbl.setFont(px_font(19, QFont.Weight.Light, spacing=3.5))
+        self._title_lbl.setFont(px_font(18, QFont.Weight.DemiBold, spacing=0.5))
         self._title_lbl.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
         self._title_lbl.setToolTip(self._subtitle(display))
         name_col.addWidget(self._title_lbl)
         self._sub_lbl = QLabel(f"{APP_VERSION}  ·  PERSONAL AI SYSTEM")
-        self._sub_lbl.setFont(px_font(9, QFont.Weight.DemiBold, spacing=2.2))
-        self._sub_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
+        self._sub_lbl.setFont(px_font(9, QFont.Weight.Medium, spacing=0.6))
+        self._sub_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
         name_col.addWidget(self._sub_lbl)
         lay.addLayout(name_col)
         lay.addSpacing(8)
@@ -1251,22 +1261,20 @@ class MainWindow(QMainWindow):
         self._ctrl_btn.setToolTip("Controls — the everyday switches")
         self._ctrl_btn.clicked.connect(self._toggle_controls)
         lay.addWidget(self._ctrl_btn)
-        lay.addStretch()
 
-        self._state_chip = StateChip()
-        lay.addWidget(self._state_chip)
         lay.addStretch()
+        self._state_chip = None
 
         clock_col = QVBoxLayout()
-        clock_col.setSpacing(0)
+        clock_col.setSpacing(1)
         self._clock_lbl = QLabel("00:00:00")
-        self._clock_lbl.setFont(px_font(22, QFont.Weight.Light, mono=True, spacing=1))
+        self._clock_lbl.setFont(px_font(20, QFont.Weight.Medium, mono=True))
         self._clock_lbl.setStyleSheet(f"color: {C.WHITE}; background: transparent;")
         self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         clock_col.addWidget(self._clock_lbl)
         self._date_lbl = QLabel("")
-        self._date_lbl.setFont(px_font(9, QFont.Weight.DemiBold, spacing=1.6))
-        self._date_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
+        self._date_lbl.setFont(px_font(9, QFont.Weight.Medium, spacing=0.6))
+        self._date_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         self._date_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         clock_col.addWidget(self._date_lbl)
         lay.addLayout(clock_col)
@@ -1274,7 +1282,7 @@ class MainWindow(QMainWindow):
         self._fs_btn = IconButton("expand", 32)
         self._fs_btn.setToolTip("Fullscreen  [F11]")
         self._fs_btn.clicked.connect(self._toggle_fullscreen)
-        lay.addWidget(self._fs_btn)
+        self._fs_btn.hide()
         return w
 
     def _tick_clock(self):
@@ -1283,22 +1291,19 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _subtitle(display: str) -> str:
-        return ("Just A Rather Very Intelligent System"
-                if display.replace(".", "") == "SYNC" else "Personal AI Assistant")
+        return ("Software Yeild and Navigation for Creation"
+                if display.replace(".", "") == "S.Y.N.C" else "Personal AI Assistant")
 
     def _fit_side_columns(self) -> None:
         """Side columns grow with the window, within limits, so the centre keeps
         the space a larger window was opened for."""
         W = self.width()
         if hasattr(self, "_left_panel"):
-            self._left_panel.setFixedWidth(max(190, min(250, int(W * 0.19))))
+            self._left_panel.setFixedWidth(max(160, min(200, int(W * 0.14))))
         if hasattr(self, "_right_panel"):
-            self._right_panel.setFixedWidth(max(290, min(400, int(W * 0.27))))
-        # The network graph is the first thing to give up its space: below this
-        # height the gauges and the task list need it more, and the rate itself
-        # is still in STATUS.
+            self._right_panel.setFixedWidth(max(200, min(245, int(W * 0.16))))
         if hasattr(self, "_net_panel"):
-            self._net_panel.setVisible(self.height() >= 820)
+            self._net_panel.setVisible(True)
 
     def _refresh_identity_rows(self) -> None:
         """Engine and voice, read from config — on start and whenever they change."""
@@ -1328,7 +1333,7 @@ class MainWindow(QMainWindow):
     def _build_left_panel(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
-        w.setFixedWidth(200)
+        w.setFixedWidth(180)
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
@@ -1364,7 +1369,8 @@ class MainWindow(QMainWindow):
         for row in (self._row_uptime, self._row_proc, self._row_net, self._row_os,
                     self._row_engine, self._row_voice):
             stp.body.addWidget(row)
-        lay.addWidget(stp)
+        stp.hide()
+        self._status_panel = stp
 
         # Background tasks (core/tasks). Read from the engine every two seconds —
         # an in-memory list, no disk — and hidden rows cost nothing to paint.
@@ -1446,7 +1452,9 @@ class MainWindow(QMainWindow):
         self._panel_switch.setStyleSheet(btn_css("dim", align="center"))
         self._panel_switch.clicked.connect(self._flip_tasks_panel)
         self._tasks_panel.add_header_widget(self._panel_switch)
-        lay.addWidget(self._tasks_panel, stretch=1)
+        self._tasks_panel.hide()
+
+        lay.addStretch(1)
         self._tasks_tmr = QTimer(self)
         self._tasks_tmr.timeout.connect(self._refresh_tasks)
         self._tasks_tmr.start(2000)
@@ -1583,7 +1591,7 @@ class MainWindow(QMainWindow):
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
-        w.setFixedWidth(300)
+        w.setFixedWidth(220)
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
@@ -1607,13 +1615,13 @@ class MainWindow(QMainWindow):
         cmd.body.addWidget(self._build_input_row())
 
         row = QHBoxLayout()
-        row.setSpacing(8)
-        self._mute_btn = IconButton("mic", 38, "MIC ACTIVE", "GREEN")
+        row.setSpacing(6)
+        self._mute_btn = IconButton("mic", 36, "MIC LIVE", "GREEN")
         self._mute_btn.setToolTip("Mute or unmute the microphone  [F4]")
         self._mute_btn.clicked.connect(self._toggle_mute)
         self._style_mute_btn()
         row.addWidget(self._mute_btn, 1)
-        self._interrupt_btn = IconButton("stop", 38, "INTERRUPT", "MUTED_C")
+        self._interrupt_btn = IconButton("stop", 36, "STOP", "MUTED_C")
         self._interrupt_btn.setToolTip("Stop the assistant mid-sentence  [ESC]")
         self._interrupt_btn.clicked.connect(self._do_interrupt)
         row.addWidget(self._interrupt_btn, 1)
@@ -1632,8 +1640,8 @@ class MainWindow(QMainWindow):
 
         def _btn(text, slot, style=None):
             b = QPushButton(text)
-            b.setFixedHeight(30)
-            b.setFont(px_font(11, QFont.Weight.DemiBold, spacing=1.2))
+            b.setFixedHeight(32)
+            b.setFont(px_font(10.5, QFont.Weight.Medium, spacing=0.4))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet(style or self._BTN_DIM)
             b.clicked.connect(slot)
@@ -1656,6 +1664,8 @@ class MainWindow(QMainWindow):
         # "&&": a single & in a button label is Qt's shortcut marker, and it
         # was being drawn as an underscore — "ENGINE _PROVIDERS".
         _btn("🔌  ENGINE && PROVIDERS", self._open_providers)
+        _btn("📁  WORKSPACE REPO", self._open_repo_dialog)
+        _btn("⚡  CODE AUDIT LOG", self._open_code_audit_dialog)
 
         w.adjustSize()
         return w
@@ -1669,8 +1679,8 @@ class MainWindow(QMainWindow):
         lay.setSpacing(5)
 
         def _row(button, style=None):
-            button.setFixedHeight(30)
-            button.setFont(px_font(11, QFont.Weight.DemiBold, spacing=1.2))
+            button.setFixedHeight(32)
+            button.setFont(px_font(10.5, QFont.Weight.Medium, spacing=0.4))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             if style:
                 button.setStyleSheet(style)
@@ -1700,6 +1710,10 @@ class MainWindow(QMainWindow):
         self._hud_btn.clicked.connect(self._toggle_hud_style)
         self._refresh_hud_btn()
 
+        self._eng_mode_btn = _row(QPushButton())
+        self._eng_mode_btn.clicked.connect(self._toggle_engineering_mode)
+        self._refresh_eng_mode_btn()
+
         w.adjustSize()
         return w
 
@@ -1720,6 +1734,132 @@ class MainWindow(QMainWindow):
                 pass
             self._wake_btns_sig.emit()
         threading.Thread(target=work, daemon=True, name="wake-state-warm").start()
+
+    def _open_repo_dialog(self) -> None:
+        """Select an active workspace repository root via native folder dialog."""
+        from core.repository.workspace import get_workspace
+        ws = get_workspace()
+        curr = str(ws.root or Path.cwd())
+        chosen = QFileDialog.getExistingDirectory(self, "Select Active Workspace Repository", curr)
+        if chosen:
+            try:
+                ws.set_root(chosen)
+                self._log_sig.emit(f"[Workspace] 📁 Active repository set to: {chosen}")
+                self._refresh_repo_display()
+                self._launch_folder_ide_flow(chosen)
+            except Exception as e:
+                self._log_sig.emit(f"[Workspace] ❌ Failed to set repository: {e}")
+
+    def _launch_folder_ide_flow(self, folder_path: str) -> None:
+        """Detect IDEs for newly added folder, auto-launch if 1, prompt if >1."""
+        def _work():
+            from core.repository.ide import (
+                detect_installed_ides,
+                launch_ide,
+                register_pending_ide_choice,
+                get_preferred_ide,
+            )
+            from core.repository.scanner import RepositoryScanner
+            from core.repository.index import RepositoryIndex, get_db_path_for_repo
+            from pathlib import Path
+            import os, sys
+
+            p = Path(folder_path)
+            # Background incremental scan
+            try:
+                idx = RepositoryIndex(get_db_path_for_repo(p))
+                scanner = RepositoryScanner(p, idx)
+                count = scanner.scan()
+                self._log_sig.emit(f"[RepoIndex] 📁 Indexed {count} files in {p.name}.")
+            except Exception as e:
+                self._log_sig.emit(f"[RepoIndex] ⚠️ Background scan warning: {e}")
+
+            # Detect installed IDEs
+            ides = detect_installed_ides()
+            if not ides:
+                if sys.platform == "win32":
+                    try:
+                        os.startfile(folder_path)
+                    except Exception:
+                        pass
+                self._log_sig.emit(f"[IDE] 📁 Workspace opened in File Explorer (no dedicated IDE detected).")
+                return
+
+            if len(ides) == 1:
+                only_ide = ides[0]
+                ok, msg = launch_ide(only_ide, folder_path)
+                if ok:
+                    self._log_sig.emit(f"[IDE] 💻 Auto-launched single IDE: {only_ide.name} for {p.name}. Live coding active.")
+                else:
+                    self._log_sig.emit(f"[IDE] ⚠️ {msg}")
+                return
+
+            # Check if preferred IDE exists
+            pref_id = get_preferred_ide()
+            if pref_id:
+                pref_match = next((i for i in ides if i.id == pref_id), None)
+                if pref_match:
+                    ok, msg = launch_ide(pref_match, folder_path)
+                    if ok:
+                        self._log_sig.emit(f"[IDE] 💻 Launched preferred IDE: {pref_match.name} for {p.name}. Live coding active.")
+                        return
+
+            # Multi-IDE choice: register pending and emit signal to show HUD popup
+            register_pending_ide_choice(folder_path, ides)
+            self._ide_picker_sig.emit(str(folder_path), [
+                {"id": i.id, "name": i.name, "icon": i.icon} for i in ides
+            ])
+
+        threading.Thread(target=_work, daemon=True, name="ide-flow").start()
+
+    def _open_code_audit_dialog(self) -> None:
+        """Open the real-time code audit trail viewer overlay."""
+        from core.repository.audit import get_audit_logger
+        entries = get_audit_logger().get_recent(50)
+        self._show_code_audit_overlay(entries)
+
+    def _toggle_engineering_mode(self) -> None:
+        """Toggle engineering mode on/off."""
+        from memory.config_manager import get_engineering_mode, save_engineering_mode
+        curr = get_engineering_mode()
+        new_val = not curr
+        save_engineering_mode(new_val)
+        self._refresh_eng_mode_btn()
+        self._refresh_repo_display()
+        status = "ENABLED" if new_val else "DISABLED"
+        self._log_sig.emit(f"[Workspace] 🛠 Engineering mode {status}")
+
+    def _refresh_eng_mode_btn(self) -> None:
+        if not hasattr(self, "_eng_mode_btn"):
+            return
+        from memory.config_manager import get_engineering_mode
+        eng = get_engineering_mode()
+        if eng:
+            self._eng_mode_btn.setText("🛠  ENG MODE: ACTIVE")
+            self._eng_mode_btn.setStyleSheet(btn_css("primary"))
+        else:
+            self._eng_mode_btn.setText("🛠  ENG MODE: OFF")
+            self._eng_mode_btn.setStyleSheet(self._BTN_DIM)
+
+    def _refresh_repo_display(self) -> None:
+        from memory.config_manager import get_engineering_mode, get_active_repository
+        eng = get_engineering_mode()
+        repo = get_active_repository()
+        if hasattr(self, "_sub_lbl"):
+            if eng and repo:
+                repo_name = Path(repo).name
+                self._sub_lbl.setText(f"{APP_VERSION}  ·  REPO: {repo_name.upper()}")
+            else:
+                self._sub_lbl.setText(f"{APP_VERSION}  ·  PERSONAL AI SYSTEM")
+
+    def _handle_repo_status(self, status: dict) -> None:
+        """Slot for thread-safe repository status updates."""
+        if not isinstance(status, dict):
+            return
+        repo_name = status.get("name") or status.get("repository") or "Workspace"
+        files_cnt = status.get("total_files", 0)
+        syms_cnt = status.get("total_symbols", 0)
+        self._log_sig.emit(f"[RepoIndex] 📊 {repo_name}: {files_cnt} files, {syms_cnt} symbols indexed")
 
     def _toggle_drawer(self, checked: bool):
         if checked:
@@ -1777,27 +1917,27 @@ class MainWindow(QMainWindow):
     def _build_input_row(self) -> QWidget:
         box = CommandFrame()
         row = QHBoxLayout(box)
-        row.setContentsMargins(12, 0, 4, 0)
+        row.setContentsMargins(10, 0, 6, 0)
         row.setSpacing(6)
         prompt = QLabel("›")
-        prompt.setFont(px_font(20, QFont.Weight.Light))
+        prompt.setFont(px_font(16, QFont.Weight.Medium))
         prompt.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         row.addWidget(prompt)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Type a command or question…")
-        self._input.setFont(px_font(13))
+        self._input.setPlaceholderText("Type a command or ask SYNC…")
+        self._input.setFont(px_font(11.5))
         self._input.setStyleSheet(f"""
             QLineEdit {{
                 background: transparent; color: {C.WHITE};
-                border: none; padding: 0;
+                border: none; padding: 2px 0;
                 selection-background-color: {C.PRI_GHO};
             }}
         """)
         self._input.returnPressed.connect(self._send)
         row.addWidget(self._input, stretch=1)
 
-        send = IconButton("send", 32)
+        send = IconButton("send", 28)
         send.setToolTip("Send  [Enter]")
         send.clicked.connect(self._send)
         row.addWidget(send)
@@ -2264,7 +2404,7 @@ class MainWindow(QMainWindow):
     def _build_footer(self) -> QWidget:
         self._status_strip = StatusStrip()
         self._status_strip.set_right(
-            "F4 MUTE   ·   F11 FULLSCREEN   ·   ESC INTERRUPT   ·   BY CODECRAFTERS ")
+            "F4 Mute   ·   F11 Fullscreen   ·   Esc Interrupt   ·   BY CODECRAFTERS ")
         self._refresh_status_strip()
         return self._status_strip
 
@@ -2499,35 +2639,21 @@ class MainWindow(QMainWindow):
             else "Hold a key to talk instead of streaming the mic continuously.")
 
     def _refresh_hud_btn(self):
-        from memory.config_manager import get_hud_style
-        face = get_hud_style() == "face"
-        # Neither state is "off", so both read as active — this is a choice
-        # between two things, not a switch with a disabled side.
-        self._hud_btn.setText("🧑  HUD: ANIMATED FACE" if face
-                              else "◉  HUD: REACTOR CORE")
+        self._hud_btn.setText("◉  HUD: REACTOR CORE")
         self._hud_btn.setStyleSheet(btn_css("choice"))
         self._hud_btn.setToolTip(
-            "An animated head that speaks your words and shows what SYNC is "
-            "doing. Tap to switch to the reactor core."
-            if face else
-            "A 3-D reactor core that turns with the state and moves with your "
-            "voice. Tap to switch to the animated head.")
+            "A 3-D reactor core that turns with the state and moves with your voice.")
+        self._hud_btn.hide()
 
     def _toggle_hud_style(self):
-        """Swap the centrepiece. Both objects stay in memory, so the change is
-        instant and switching back costs nothing."""
-        from memory.config_manager import get_hud_style, save_hud_style
-        want = "core" if get_hud_style() == "face" else "face"
-        save_hud_style(want)
+        from memory.config_manager import save_hud_style
+        save_hud_style("core")
         try:
-            self.hud.hud_style = want
+            self.hud.hud_style = "core"
             self.hud.update()
         except Exception:
             pass
         self._refresh_hud_btn()
-        self._log.append_log(
-            "SYS: HUD switched to the animated face." if want == "face"
-            else "SYS: HUD switched to the reactor core.")
 
     def _toggle_ptt(self):
         from memory.config_manager import (get_push_to_talk_enabled,
@@ -2638,8 +2764,13 @@ class MainWindow(QMainWindow):
 
     def _open_customize(self):
         cfg = _read_full_config()
-        if self._customize_overlay:
-            self._customize_overlay.hide()
+        if self._customize_overlay is not None:
+            try:
+                self._customize_overlay.hide()
+                self._customize_overlay.deleteLater()
+            except RuntimeError:
+                pass
+            self._customize_overlay = None
         cw = self.centralWidget()
         ov = CustomizeOverlay(
             cfg.get("assistant_name", "SYNC") or "SYNC",
@@ -2658,6 +2789,7 @@ class MainWindow(QMainWindow):
         ov.on_preview = self._preview_ui_color
         ov.saved.connect(self._apply_name_update)
         ov.show()
+        ov.raise_()
         self._customize_overlay = ov
 
     def _preview_ui_color(self, hex_color: str):
@@ -2671,7 +2803,7 @@ class MainWindow(QMainWindow):
         """Update all name/theme-dependent UI elements and persist to config."""
         self._assistant_name = name.strip() or "SYNC"
         display = self._assistant_name.upper()
-        self.setWindowTitle(f"{display} — {APP_VERSION}")
+        self.setWindowTitle("S.Y.N.C")
         self._title_lbl.setText(display)
         self._title_lbl.setToolTip(self._subtitle(display))
         self._log._ai_name_lc = self._assistant_name.lower()
@@ -2807,6 +2939,44 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._log.append_log(f"ERR: Confirmation failed — {e}")
 
+    def _show_ide_picker(self, folder_path: str, ides: list):
+        self._hide_ide_picker()
+        from gui.overlays import IdeChoiceOverlay
+        ov = IdeChoiceOverlay(folder_path, ides, parent=self.centralWidget())
+        ov.ide_chosen.connect(self._on_ide_chosen)
+        ov.cancelled.connect(self._hide_ide_picker)
+        self._centre_overlay(ov)
+        self._ide_picker_overlay = ov
+
+    def _hide_ide_picker(self):
+        ov = getattr(self, "_ide_picker_overlay", None)
+        if ov is not None:
+            ov.hide()
+            ov.deleteLater()
+            self._ide_picker_overlay = None
+
+    def _on_ide_chosen(self, ide_id: str):
+        self._hide_ide_picker()
+        try:
+            from core.repository.ide import resolve_pending_ide_choice
+            ok, msg, matched = resolve_pending_ide_choice(ide_id)
+            if ok and matched:
+                self._log_sig.emit(f"[IDE] 💻 Launched {matched.name} for active workspace. Live coding active.")
+            else:
+                self._log_sig.emit(f"[IDE] ⚠️ {msg}")
+        except Exception as e:
+            self._log_sig.emit(f"[IDE] ❌ Launch failed: {e}")
+
+    def _show_code_audit_overlay(self, entries: list):
+        ov = getattr(self, "_code_audit_overlay", None)
+        if ov is not None:
+            ov.hide()
+            ov.deleteLater()
+        from gui.overlays import CodeAuditOverlay
+        ov = CodeAuditOverlay(entries, parent=self.centralWidget())
+        self._centre_overlay(ov)
+        self._code_audit_overlay = ov
+
     def _open_plugin_manager(self):
         plugins = self.get_plugins() if self.get_plugins else []
         cw = self.centralWidget()
@@ -2891,9 +3061,9 @@ class MainWindow(QMainWindow):
 
     def _style_mute_btn(self):
         if self._muted:
-            self._mute_btn.set_look("mic_off", "MIC MUTED", "MUTED_C")
+            self._mute_btn.set_look("mic_off", "MUTED", "MUTED_C")
         else:
-            self._mute_btn.set_look("mic", "MIC ACTIVE", "GREEN")
+            self._mute_btn.set_look("mic", "MIC LIVE", "GREEN")
         self._refresh_status_strip()
 
     def _send(self):
@@ -2907,7 +3077,7 @@ class MainWindow(QMainWindow):
     def _apply_state(self, state: str):
         self.hud.state    = state
         self.hud.speaking = (state == "SPEAKING")
-        if hasattr(self, "_state_chip"):
+        if getattr(self, "_state_chip", None) is not None:
             self._state_chip.set_state(state)
 
     def _check_config(self) -> bool:

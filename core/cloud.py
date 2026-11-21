@@ -935,8 +935,16 @@ def build_system_prompt(decls: list) -> str:
         "it was saved with save_memory.",
     ])
     body = template
-    for k, v in {"assistant_name": name, "capabilities": caps, "limits": limits,
-                 "platform": f"{platform.system()} {platform.release()}"}.items():
+    replacements = {
+        "assistant_name": name,
+        "capabilities": caps,
+        "limits": limits,
+        "platform": f"{platform.system()} {platform.release()}",
+        "developer_level": "Infer from conversation style and developer wording",
+        "stack": "Auto-detect from project repository",
+        "context": "Cloud session workspace",
+    }
+    for k, v in replacements.items():
         body = body.replace("{" + k + "}", v)
 
     addr = (f"ADDRESS: Always call the user '{user}'." if user else

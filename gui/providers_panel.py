@@ -144,9 +144,9 @@ class ProvidersOverlay(_HudOverlay):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             ProvidersOverlay {{
-                background: rgba(0, 6, 10, 249);
+                background: rgba(14, 17, 23, 249);
                 border: 1px solid {C.BORDER_B};
-                border-radius: 8px;
+                border-radius: 10px;
             }}
         """)
         self.setFixedWidth(self._OW)

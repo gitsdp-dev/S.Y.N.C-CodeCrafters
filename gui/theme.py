@@ -95,27 +95,27 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    BG        = "#00060a"
-    PANEL     = "#010d14"
-    PANEL2    = "#010f18"
-    BORDER    = "#0d3347"
-    BORDER_B  = "#1a5c7a"
-    BORDER_A  = "#0f4060"
-    PRI       = "#65c466"
-    PRI_DIM   = "#007a99"
-    PRI_GHO   = "#001f2e"
-    ACC       = "#ff6b00"
-    ACC2      = "#ffcc00"
-    GREEN     = "#00ff88"
-    GREEN_D   = "#00aa55"
-    RED       = "#ff3355"
-    MUTED_C   = "#ff3366"
-    TEXT      = "#8ffcff"
-    TEXT_DIM  = "#3a8a9a"
-    TEXT_MED  = "#5ab8cc"
-    WHITE     = "#d8f8ff"
-    DARK      = "#000d14"
-    BAR_BG    = "#011520"
+    BG        = "#0e0f0e"   # deep midnight obsidian glass base
+    PANEL     = "#151716"   # smoked frosted glass surface tint
+    PANEL2    = "#1d211e"   # elevated frosted glass surface tint
+    BORDER    = "#2f3d34"   # crisp glass frame border
+    BORDER_A  = "#3e5746"   # lit glass border / card outline
+    BORDER_B  = "#537a60"   # high-contrast specular / active highlight
+    PRI       = "#00ff50"   # vibrant electric cyber green / neobrutalist primary
+    PRI_DIM   = "#09b840"   # saturated neon midtone
+    PRI_GHO   = "#0b3819"   # translucent neon glass glow
+    ACC       = "#ff9900"   # neobrutalist electric amber / gold
+    ACC2      = "#d946ef"   # neobrutalist electric magenta / violet
+    GREEN     = "#00ff50"   # neobrutalist neon cyber lime / green
+    GREEN_D   = "#059669"   # deep emerald
+    RED       = "#ff2a55"   # high-voltage crimson
+    MUTED_C   = "#ff2a6d"   # electric neon rose
+    TEXT      = "#ffffff"   # pure, crisp 100% white for maximum punch
+    TEXT_DIM  = "#5a708c"   # frosted muted slate
+    TEXT_MED  = "#9db2cb"   # frosted cool silver
+    WHITE     = "#ffffff"   # pure white
+    DARK      = "#090a09"   # sunken deep obsidian
+    BAR_BG    = "#212622"   # smoked glass track bar background
 
 
 # Keys tied to the accent colour — status colours (ACC, GREEN, RED…) stay fixed
@@ -126,15 +126,15 @@ _HUE_LINKED = (
 )
 _PALETTE_DEFAULTS: dict[str, str] = {k: getattr(C, k) for k in _HUE_LINKED}
 
-DEFAULT_UI_COLOR = _PALETTE_DEFAULTS["PRI"]
+DEFAULT_UI_COLOR = "#00ff50"
 
 
 def apply_ui_accent(accent_hex: str) -> bool:
     """
-    Re-derives the whole teal-family palette from the chosen accent colour
-    (hue shift — brightness/saturation ratios are preserved, design stays intact).
-    Painted elements (HUD, waveform, metrics) pick up the new colour on the next
-    frame; stylesheet-based panels pick it up when they are rebuilt.
+    Applies the chosen accent color across the app with bold brutalist prominence.
+    The accent prominently drives PRI, PRI_DIM, PRI_GHO, and gives card borders
+    and structural lines an architectural, high-definition presence, while keeping
+    typography (TEXT, WHITE, TEXT_MED, TEXT_DIM) pure and high-contrast.
     """
     import colorsys
 
@@ -152,18 +152,39 @@ def apply_ui_accent(accent_hex: str) -> bool:
         b = int(h[5:7], 16) / 255
         return colorsys.rgb_to_hsv(r, g, b)
 
-    base_h            = _hsv(_PALETTE_DEFAULTS["PRI"])[0]
-    acc_h, acc_s, _av = _hsv(accent_hex)
-    dh   = acc_h - base_h
-    grey = acc_s < 0.08   # near-grey accent → the whole theme is desaturated
+    def _rgb_hex(h: float, s: float, v: float) -> str:
+        r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0.0, min(1.0, s)), max(0.0, min(1.0, v)))
+        return "#{:02x}{:02x}{:02x}".format(int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
 
-    for key, hex0 in _PALETTE_DEFAULTS.items():
-        h, s, v = _hsv(hex0)
-        if grey:
-            s *= 0.15
-        r, g, b = colorsys.hsv_to_rgb((h + dh) % 1.0, s, v)
-        setattr(C, key, "#{:02x}{:02x}{:02x}".format(
-            int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5)))
+    acc_h, acc_s, acc_v = _hsv(accent_hex)
+    grey = acc_s < 0.08
+
+    # 1. Neobrutalist primary accents (hyper-vibrant, electric)
+    C.PRI = accent_hex
+    C.PRI_DIM = _rgb_hex(acc_h, min(1.0, acc_s * 0.95), max(0.55, acc_v * 0.72))
+    C.PRI_GHO = _rgb_hex(acc_h, min(0.80, acc_s * 0.85), 0.22) if not grey else "#16202c"
+
+    # 2. Lit glass borders with neobrutalist structural presence
+    b_sat = 0.0 if grey else min(0.38, acc_s * 0.32)
+    C.BORDER   = _rgb_hex(acc_h, b_sat * 0.70, 0.24)
+    C.BORDER_A = _rgb_hex(acc_h, b_sat * 0.88, 0.34)
+    C.BORDER_B = _rgb_hex(acc_h, b_sat, 0.48)
+
+    # 3. Smoked frosted glass surfaces with subtle cool refraction
+    bg_sat = 0.0 if grey else min(0.10, acc_s * 0.08)
+    panel_sat = 0.0 if grey else min(0.15, acc_s * 0.12)
+    C.DARK   = _rgb_hex(acc_h, bg_sat * 0.8, 0.038)
+    C.BG     = _rgb_hex(acc_h, bg_sat, 0.058)
+    C.PANEL  = _rgb_hex(acc_h, panel_sat, 0.092)
+    C.PANEL2 = _rgb_hex(acc_h, panel_sat * 1.1, 0.13)
+    C.BAR_BG = _rgb_hex(acc_h, panel_sat * 1.2, 0.15)
+
+    # 4. Pure, crisp typography for maximum punch and legibility
+    C.WHITE    = "#ffffff"
+    C.TEXT     = "#ffffff"
+    C.TEXT_MED = "#9db2cb"
+    C.TEXT_DIM = "#5a708c"
+
     return True
 
 

@@ -40,20 +40,24 @@ def routines_path() -> Path:
 def seed_defaults(engine, brief_enabled: bool) -> None:
     """Create the built-in routines once, from the settings the app had."""
     if engine.seeded:
+        for r in engine.list():
+            if not r.get("enabled"):
+                engine.update(r["id"], enabled=True)
         return
     if engine.find_builtin("briefing") is None:
         engine.add(name="Opening briefing", kind="builtin", builtin="briefing",
-                   trigger={"type": "startup"}, system=True, enabled=bool(brief_enabled),
-                   options={"news": True, "news_topic": "top world news today", "extra": ""})
+                   trigger={"type": "startup"}, system=True, enabled=True,
+                   options={"news": True, "news_topic": "top developer and tech news", "extra": ""})
     if engine.find_builtin("checkin") is None:
         engine.add(name="Check-in", kind="builtin", builtin="checkin",
                    trigger={"type": "idle", "minutes": 15, "cooldown": 20}, system=True, quiet=True,
+                   enabled=True,
                    options={"focuses": list(DEFAULT_FOCUSES)})
     if engine.find_builtin("news_watch") is None:
         engine.add(name="News watch", kind="builtin", builtin="news_watch",
                    trigger={"type": "time", "rule": {"type": "interval", "minutes": 30,
                                                      "start": "00:00", "end": "23:59"}},
-                   system=True, quiet=True)
+                   system=True, quiet=True, enabled=True)
     engine.mark_seeded()
 
 

@@ -260,6 +260,62 @@ class SyncUI:
         """Thread-safe: display content in the panel below the HUD."""
         self._win._content_sig.emit(title[:48], text[:4000])
 
+    def show_repo_status(self, status: dict) -> None:
+        """Thread-safe: update repository indexing and analysis status in the UI."""
+        self._win._repo_status_sig.emit(dict(status or {}))
+
+    def show_ide_picker(self, folder_path: str, ides: list, on_chosen=None) -> None:
+        """Thread-safe: display the IDE selection option popup on the HUD."""
+        self._win._ide_picker_sig.emit(str(folder_path), list(ides))
+
+    def hide_ide_picker(self) -> None:
+        """Thread-safe: dismiss the IDE selection popup."""
+        self._win._ide_picker_hide_sig.emit()
+
+    def show_code_audit(self, entries: list) -> None:
+        """Thread-safe: surface the code audit trail overlay on the HUD."""
+        self._win._code_audit_sig.emit(list(entries))
+
+    def record_code_audit(self, entry: dict) -> None:
+        """Thread-safe: record a code change and update the GUI log."""
+        from core.repository.audit import get_audit_logger
+        logger = get_audit_logger()
+        logger.record_change(
+            file_path=entry.get("file_path", ""),
+            action=entry.get("action", "modify"),
+            diff_text=entry.get("diff_text", ""),
+            voice_summary=entry.get("voice_summary", ""),
+            ide=entry.get("ide", ""),
+        )
+        self.write_log(f"[CODE AUDIT] ⚡ {entry.get('file_path')}: {entry.get('voice_summary')}")
+
+    def add_workspace_folder_dialog(self) -> None:
+        """Trigger native folder picker dialog for adding a workspace folder."""
+        self._win._open_repo_dialog()
+
+    def set_engineering_mode(self, enabled: bool) -> None:
+        """Thread-safe: toggle engineering mode on or off."""
+        from memory.config_manager import save_engineering_mode
+        save_engineering_mode(bool(enabled))
+        self._win._refresh_eng_mode_btn()
+        self._win._refresh_repo_display()
+
+    def set_active_repository(self, path: str) -> None:
+        """Thread-safe: set active workspace repository."""
+        from core.repository.workspace import get_workspace
+        get_workspace().set_root(path)
+        self._win._refresh_repo_display()
+
+    def get_active_repository(self) -> str:
+        """Return the path to active workspace repository."""
+        from memory.config_manager import get_active_repository
+        return get_active_repository()
+
+    def is_engineering_mode(self) -> bool:
+        """Check if engineering mode is enabled."""
+        from memory.config_manager import get_engineering_mode
+        return get_engineering_mode()
+
     def show_code_job(self, job: dict) -> None:
         """Thread-safe: draw the coding agent's live progress in the panel."""
         self._win._codejob_sig.emit(dict(job))

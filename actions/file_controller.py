@@ -97,6 +97,18 @@ _SAFE_ROOTS: list[Path] = [
 def _is_safe_path(target: Path) -> bool:
     """Is the given path inside _SAFE_ROOTS? If not, reject the operation."""
     try:
+        from memory.config_manager import get_engineering_mode
+        if get_engineering_mode():
+            from core.repository.workspace import get_workspace
+            ws_root = get_workspace().root
+            if not ws_root:
+                return False
+            resolved = target.resolve()
+            return resolved == ws_root.resolve() or resolved.is_relative_to(ws_root.resolve())
+    except Exception:
+        pass
+
+    try:
         resolved = target.resolve()
         return any(
             resolved == root.resolve() or resolved.is_relative_to(root.resolve())

@@ -251,3 +251,47 @@ HTTP endpoint directly from a tool.
 - Python code must run on the interpreter version the project already uses, on
   Windows first; use `pathlib` or `os.path` for paths and never assume `/` or a
   drive letter.
+
+## Software Engineering Mode & Repository Subsystem
+
+When `engineering_mode` is enabled (or active repository configured):
+- Tool profile switches to `PROFILE_ENGINEERING`: general automation, media, and weather tools are disabled; only repository-scoped operations (`list_files`, `read_file`, `read_range`, `search_text`, `find_symbol`, `find_references`, `inspect_dependencies`, `get_repository_summary`, `apply_patch`, `preview_patch`, `rollback_patch`, `create_file`, `rename_file`, `delete_file`, `run_tests`, `run_linter`, `run_formatter`, `run_type_checker`, `run_build`, `collect_diagnostics`, `git_status`, `git_diff`, `git_log`, `git_branch`, `dev_agent`, `code_helper`, `file_processor`, `web_search`) are offered.
+- All file reads and writes are strictly restricted within the active repository root via `core.repository.workspace.WorkspaceManager`.
+- Path traversal (`../`), Windows drive jumping, and symlink escapes raise `WorkspaceSecurityError`.
+- Edits prefer unified patches (`apply_patch`, `preview_patch`) with multi-step rollback snapshots (`rollback_patch`).
+- Gated operations (destructive commands, patch application, dependency installation) require explicit user approval via `core.confirm`.
+- Repository indexing is maintained in SQLite outside the repository (`cache/repo_indices/`).
+
+## Repository Inspection & Audit Rules
+
+When inspecting, reviewing, auditing, or explaining an unfamiliar repository folder:
+
+### 1. Strict Read-Only Mode
+- **NO FILE EDITS:** Do not modify, create, rename, or delete any files in this repository under any circumstances.
+- **NO GIT MUTATIONS:** Do not run `git commit`, `git push`, `git checkout`, `git reset`, or `git clean`. Only read-only commands (`git status`, `git log`, `git diff`, `git branch`) are permitted.
+
+### 2. Terminal & Execution Safety
+- **NO UNTRUSTED EXECUTION:** Never run build scripts, test suites, linters, package managers (`npm install`, `pip install`, `cargo build`), or local binaries without explicit confirmation, as unfamiliar repositories may contain malicious lifecycle scripts (e.g., `postinstall`).
+- **NO NETWORK CALLS:** Do not execute `curl`, `wget`, or scripts that make external network requests.
+
+### 3. Secrets & Sensitive Data Protection
+- **DO NOT READ SECRETS:** Never open, parse, or output the contents of `.env` files, `.pem`/`.key` certificates, SSH keys, cloud credential files (`~/.aws`, `~/.ssh`), or files matching `*secret*` or `*credential*`.
+- **REDACT IF FOUND:** If you encounter hardcoded API keys, tokens, or passwords in source files, flag their file path and line number as a security finding, but **do not** echo the secret value in your response.
+
+### 4. Inspection & Analysis Workflow
+When asked to inspect or explain the codebase, follow this sequence:
+1. **Architecture First:** Start by analyzing the directory tree, `README.md`, and dependency manifests (`package.json`, `requirements.txt`, `go.mod`, `Cargo.toml`, etc.) to map the tech stack and entry points.
+2. **Trace Data Flow:** Identify main entry points (`main.*`, `index.*`, `app.*`) and trace how routing, state, and external APIs connect.
+3. **Cite Exact Locations:** Always reference specific file paths and line numbers (e.g., `src/auth/login.ts:42`) when explaining behavior or flagging issues.
+4. **Flag Risks:** Proactively highlight security vulnerabilities, hardcoded credentials, deprecated dependencies, or overly complex logic without rewriting the code unless explicitly asked.
+
+### 5. User Explicit Instruction Override & Provider TTS Routing
+- **Explicit Instruction Override:** When the user explicitly instructs S.Y.N.C to commit changes to GitHub (`git_commit`), push to a remote (`git_push`), run terminal tools (`curl`, `wget`), or install dependencies (`pip install`, `npm install`), S.Y.N.C must execute the command immediately as instructed. The strict read-only restriction and execution guards apply during autonomous inspection and audits when the user has not asked for changes or executions. An explicit user command overrides the read-only guard.
+- **Active Provider Response TTS Routing:** Every assistant response, status update, and tool completion is routed directly through the active provider response TTS (Gemini Live audio stream when using Gemini, or the active configured provider TTS in pipeline mode). Never divert responses to local-only offline TTS synthesizers when an active provider session is running.
+
+### 6. IDE Terminal Command Staging, Code Craftsmanship & .sync_backup Audits
+- **IDE Terminal Integration & Staging:** When the user instructs to run or write a command in the terminal (VS Code or any IDE terminal), S.Y.N.C must use `write_ide_terminal` to write the exact command into the active IDE terminal. S.Y.N.C must **NEVER execute that command on its own**. The command sits typed in the terminal prompt ready for the user to inspect. S.Y.N.C only executes that command (via `execute_ide_terminal`) when the user explicitly instructs to execute it (e.g. "execute it", "run it", "press enter").
+- **Code Craftsmanship & Commenting:** When working in any local repository, S.Y.N.C must write polished, cleanly organized code with proper modular structure, clear variable names, and comprehensive docstrings/comments explaining *why* decisions were made and documenting edge cases. S.Y.N.C must never write messy, hacky code that just barely works.
+- **.sync_backup Directory & Audit Logs:** All code backups and modifications must be saved in `.sync_backup` inside the active repository root with detailed audit trails (`audit.jsonl` and `audit.json`). The legacy folder name `.jarvis_backup` is retired.
+- **Aligning on Requirements & Architecture:** When asked to build a new project or major feature, S.Y.N.C must ask the user targeted questions about what they want to build (e.g. core features, user workflows, preferred framework/libraries, architecture patterns, UI vs CLI, database needs) to ensure the best possible result before generating code.
+

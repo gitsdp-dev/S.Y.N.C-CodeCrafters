@@ -85,6 +85,13 @@ class PluginRegistry:
 
     # -- called by main.py at LiveConnectConfig build time --
     def get_tool_declarations(self) -> list[dict]:
+        try:
+            from memory.config_manager import get_engineering_mode
+            if get_engineering_mode():
+                # External/general plugins are disabled by default in engineering mode
+                return []
+        except Exception:
+            pass
         decls = []
         for name, rec in self._plugins.items():
             if get_plugin_enabled(name):
@@ -115,6 +122,12 @@ class PluginRegistry:
 
     # -- called by main.py from _execute_tool's else branch --
     def run(self, name: str, parameters: dict, player=None, session_memory=None) -> str:
+        try:
+            from memory.config_manager import get_engineering_mode
+            if get_engineering_mode():
+                return f"Plugin '{name}' is disabled in engineering mode."
+        except Exception:
+            pass
         rec = self._plugins.get(name)
         if rec is None or not rec.valid:
             return f"Plugin '{name}' is not available."

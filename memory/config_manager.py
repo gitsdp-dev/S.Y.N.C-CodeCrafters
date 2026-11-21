@@ -188,24 +188,17 @@ def save_push_to_talk_enabled(enabled: bool) -> None:
     _save_flag("push_to_talk_enabled", enabled)
 
 
-HUD_STYLES = ("face", "core")
+HUD_STYLES = ("core",)
 
 
 def get_hud_style() -> str:
-    """Which centrepiece the HUD draws: the animated head, or the reactor core.
-
-    Taste, not capability — both render in the same software painter and cost
-    about the same. Defaults to the head because that is what MARK LIV shipped
-    with; anyone who preferred the older look can switch back in ⚙ and the
-    choice survives a restart.
+    """Which centrepiece the HUD draws: reactor core.
     """
-    v = str(load_api_keys().get("hud_style", "face")).strip().lower()
-    return v if v in HUD_STYLES else "face"
+    return "core"
 
 
 def save_hud_style(style: str) -> None:
-    s = str(style or "").strip().lower()
-    _save_flag("hud_style", s if s in HUD_STYLES else "face")
+    _save_flag("hud_style", "core")
 
 
 def get_ui_scale() -> float:
@@ -666,3 +659,146 @@ def save_providers(mode: str = None, pipeline: dict = None, creds: dict = None,
 
     data["providers"] = block
     _write_config(data)
+
+
+# ── Engineering mode settings ────────────────────────────────────────────────
+def get_engineering_mode() -> bool:
+    """Whether S.Y.N.C is in workspace-scoped software engineering mode."""
+    return bool(load_api_keys().get("engineering_mode", False))
+
+
+@_locked
+def save_engineering_mode(enabled: bool) -> None:
+    data = _read_for_write()
+    data["engineering_mode"] = bool(enabled)
+    _write_config(data)
+
+
+def get_active_repository() -> str:
+    """Absolute path to the active workspace repository root, or empty."""
+    return str(load_api_keys().get("active_repository", "") or "").strip()
+
+
+@_locked
+def save_active_repository(path: str) -> None:
+    data = _read_for_write()
+    data["active_repository"] = str(path or "").strip()
+    _write_config(data)
+
+
+def get_repository_index_enabled() -> bool:
+    return bool(load_api_keys().get("repository_index_enabled", True))
+
+
+@_locked
+def save_repository_index_enabled(enabled: bool) -> None:
+    data = _read_for_write()
+    data["repository_index_enabled"] = bool(enabled)
+    _write_config(data)
+
+
+def get_repository_index_worker_count() -> int:
+    default_workers = min(4, max(1, os.cpu_count() or 1))
+    val = load_api_keys().get("repository_index_worker_count")
+    try:
+        return int(val) if val is not None else default_workers
+    except (ValueError, TypeError):
+        return default_workers
+
+
+@_locked
+def save_repository_index_worker_count(count: int) -> None:
+    data = _read_for_write()
+    data["repository_index_worker_count"] = max(1, min(16, int(count)))
+    _write_config(data)
+
+
+def get_repository_max_file_bytes() -> int:
+    val = load_api_keys().get("repository_max_file_bytes")
+    try:
+        return int(val) if val is not None else 1_000_000
+    except (ValueError, TypeError):
+        return 1_000_000
+
+
+@_locked
+def save_repository_max_file_bytes(bytes_count: int) -> None:
+    data = _read_for_write()
+    data["repository_max_file_bytes"] = max(10_000, int(bytes_count))
+    _write_config(data)
+
+
+def get_repository_max_files() -> int:
+    val = load_api_keys().get("repository_max_files")
+    try:
+        return int(val) if val is not None else 10_000
+    except (ValueError, TypeError):
+        return 10_000
+
+
+@_locked
+def save_repository_max_files(count: int) -> None:
+    data = _read_for_write()
+    data["repository_max_files"] = max(100, int(count))
+    _write_config(data)
+
+
+def get_repository_max_depth() -> int:
+    val = load_api_keys().get("repository_max_depth")
+    try:
+        return int(val) if val is not None else 20
+    except (ValueError, TypeError):
+        return 20
+
+
+@_locked
+def save_repository_max_depth(depth: int) -> None:
+    data = _read_for_write()
+    data["repository_max_depth"] = max(1, int(depth))
+    _write_config(data)
+
+
+def get_engineering_confirm_patches() -> bool:
+    return bool(load_api_keys().get("engineering_confirm_patches", True))
+
+
+@_locked
+def save_engineering_confirm_patches(val: bool) -> None:
+    data = _read_for_write()
+    data["engineering_confirm_patches"] = bool(val)
+    _write_config(data)
+
+
+def get_engineering_confirm_commands() -> bool:
+    return bool(load_api_keys().get("engineering_confirm_commands", True))
+
+
+@_locked
+def save_engineering_confirm_commands(val: bool) -> None:
+    data = _read_for_write()
+    data["engineering_confirm_commands"] = bool(val)
+    _write_config(data)
+
+
+def get_engineering_confirm_dependency_installs() -> bool:
+    return bool(load_api_keys().get("engineering_confirm_dependency_installs", True))
+
+
+@_locked
+def save_engineering_confirm_dependency_installs(val: bool) -> None:
+    data = _read_for_write()
+    data["engineering_confirm_dependency_installs"] = bool(val)
+    _write_config(data)
+
+
+def get_preferred_ide() -> str:
+    val = load_api_keys().get("preferred_ide", "")
+    return str(val or "")
+
+
+@_locked
+def save_preferred_ide(ide_id: str) -> None:
+    data = _read_for_write()
+    data["preferred_ide"] = str(ide_id or "").strip().lower()
+    _write_config(data)
+

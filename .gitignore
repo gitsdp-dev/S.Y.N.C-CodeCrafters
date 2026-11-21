@@ -53,3 +53,6 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+cache/
+.sync_backup/
+.jarvis_backup/

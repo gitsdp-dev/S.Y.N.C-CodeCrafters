@@ -239,6 +239,8 @@ Purpose of this file: {file_desc}
 General rules:
 - Output ONLY raw code. Absolutely no explanation, no markdown, no triple backticks.
 - Write COMPLETE, RUNNABLE code — no placeholders, no "# TODO", no "pass" stubs.
+- Produce polished, cleanly organized code with proper modular structure, consistent formatting, and meaningful variable/function names. Never write messy or hacky code that just barely works.
+- Add proper docstrings and comments explaining the architecture and 'why' behind non-obvious logic, functions, classes, and edge cases.
 - Every import must either be from the standard library, listed dependencies, or the project files shown above.
 - Match import paths EXACTLY to the file paths in the project structure (e.g. if file is "utils/helpers.py", import as "from utils.helpers import ...").
 - Use proper error handling (try/except) where I/O or network calls are made.
@@ -251,8 +253,22 @@ Code for {file_path}:"""
         code = _strip_fences(response.text)
 
         full_path = project_dir / file_path
+        existed = full_path.exists()
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(code, encoding="utf-8")
+
+        try:
+            from core.repository.audit import get_audit_logger
+            from core.repository.ide import get_preferred_ide
+            get_audit_logger().record_change(
+                file_path=str(file_path),
+                action="modify" if existed else "create",
+                voice_summary=f"Wrote {len(code.splitlines())} lines to `{file_path}`.",
+                additions=len(code.splitlines()),
+                ide=get_preferred_ide() or "",
+            )
+        except Exception:
+            pass
 
         print(f"[DevAgent] ✅ Written: {file_path} ({len(code)} chars)")
         return code
@@ -280,6 +296,17 @@ def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
 
     if not to_install:
         return f"All dependencies already installed: {', '.join(dependencies)}"
+
+    from memory.config_manager import get_engineering_mode, get_engineering_confirm_dependency_installs
+    if get_engineering_mode() or get_engineering_confirm_dependency_installs():
+        from core import confirm as confirm_gate
+        req_msg = confirm_gate.request(
+            key="devagent_pip_install",
+            title=f"Install dependencies: {', '.join(to_install)}",
+            detail=f"pip install {' '.join(to_install)} in {project_dir.name}",
+            run=lambda: subprocess.run([sys.executable, "-m", "pip", "install"] + to_install, capture_output=True, text=True, cwd=str(project_dir)),
+        )
+        return f"Dependency installation requires approval: {req_msg}"
 
     print(f"[DevAgent] 📦 Installing: {to_install}")
     try:
@@ -353,6 +380,10 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
 
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:
     """If there is a ModuleNotFoundError, tries to auto-install the missing package."""
+    from memory.config_manager import get_engineering_mode, get_engineering_confirm_dependency_installs
+    if get_engineering_mode() or get_engineering_confirm_dependency_installs():
+        # Stop silent dependency installation in engineering mode
+        return False
     pattern = re.compile(
         r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", re.IGNORECASE
     )
@@ -490,10 +521,16 @@ def _build_project(
         if speak: speak(msg)
         return msg
 
-    proj_name    = project_name or plan.get("project_name", "jarvis_project")
-    proj_name    = re.sub(r"[^\w\-]", "_", proj_name)
-    project_dir  = PROJECTS_DIR / proj_name
-    project_dir.mkdir(parents=True, exist_ok=True)
+    from memory.config_manager import get_active_repository
+    active_repo = get_active_repository()
+    if active_repo and Path(active_repo).is_dir():
+        project_dir = Path(active_repo)
+        proj_name = project_dir.name
+    else:
+        proj_name    = project_name or plan.get("project_name", "jarvis_project")
+        proj_name    = re.sub(r"[^\w\-]", "_", proj_name)
+        project_dir  = PROJECTS_DIR / proj_name
+        project_dir.mkdir(parents=True, exist_ok=True)
 
     files        = plan.get("files", [])
     entry_point  = plan.get("entry_point", "main.py")
@@ -556,6 +593,26 @@ def _build_project(
         msg = "I could not write any project files, sir."
         if speak: speak(msg)
         return msg
+
+    # Initialize .sync_backup audit log for newly created project
+    try:
+        from datetime import datetime
+        backup_dir = project_dir / _BACKUP_DIR
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        build_audit = {
+            "timestamp": datetime.now().isoformat(),
+            "action": "build",
+            "project_name": proj_name,
+            "language": language,
+            "description": description,
+            "created_files": list(file_codes.keys()),
+            "dependencies": dependencies,
+            "status": "created",
+        }
+        with open(backup_dir / "audit.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(build_audit, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
     if dependencies:
         _update("installing")
@@ -653,14 +710,14 @@ def _build_project(
 #   built off the Qt thread, a separate window instead of the quiz board.
 #
 # WHAT MAKES IT SAFE TO SAY YES TO
-#   Every file is copied to .jarvis_backup/<time>/ inside the folder before it
+#   Every file is copied to .sync_backup/<time>/ inside the folder before it
 #   is changed, and the whole job is one entry on the shared undo stack: "undo"
 #   puts every file back and removes the ones it created.
 
 _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
               "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build",
-              ".idea", ".vscode", ".next", "target", ".jarvis_backup"}
-_BACKUP_DIR     = ".jarvis_backup"
+              ".idea", ".vscode", ".next", "target", ".jarvis_backup", ".sync_backup"}
+_BACKUP_DIR     = ".sync_backup"
 _MAX_FILE_CHARS = 120_000     # bigger than this is generated or data, not code
 _CONTEXT_CHARS  = 350_000     # file text sent to plan; MiniMax M3.1 takes 512K tokens
 _MAX_TREE       = 1500        # paths listed for the model
@@ -1042,6 +1099,10 @@ Rules for the code:
   match that file exactly — names, arguments, command-line flags, data keys.
 - Never throw away errors from code you start or call: no output sent to
   DEVNULL without a log, no success reported without checking it happened.
+- Write polished, cleanly organized code with proper modular structure, docstrings,
+  and comments. Explain the 'why' behind architectural and complex logic, handle edge
+  cases cleanly, and never write messy or hacky code that just barely works.
+- Follow consistent conventions matching the rest of the project.
 
 Return ONLY the complete new content of {rel} — every line, not just the
 changed parts. No explanation, no markdown fences, no placeholders such as
@@ -1456,6 +1517,29 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
                             context, player, stack=stack, originals=texts,
                             baseline=baseline)
 
+    # Record structured backup audit in the repository folder's .sync_backup directory
+    try:
+        from datetime import datetime
+        backup.mkdir(parents=True, exist_ok=True)
+        audit_payload = {
+            "timestamp": datetime.now().isoformat(),
+            "stamp": stamp,
+            "instruction": instruction,
+            "action": "improve",
+            "folder": folder.name,
+            "edited_files": list(edited),
+            "created_files": list(created),
+            "model": _coding_provider() or MODEL_WRITER,
+            "summary": summary,
+            "status": "completed" if not still_broken else "syntax_warnings",
+        }
+        (backup / "audit.json").write_text(json.dumps(audit_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        audit_jsonl = folder / _BACKUP_DIR / "audit.jsonl"
+        with open(audit_jsonl, "a", encoding="utf-8") as f:
+            f.write(json.dumps(audit_payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
     def restore() -> str:
         for rel in edited:
             try:
@@ -1467,6 +1551,21 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
                 (folder / rel).unlink()
             except OSError:
                 pass
+        try:
+            from datetime import datetime
+            restore_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "action": "rollback",
+                "folder": folder.name,
+                "stamp": stamp,
+                "restored_files": list(edited),
+                "removed_files": list(created),
+            }
+            audit_jsonl = folder / _BACKUP_DIR / "audit.jsonl"
+            with open(audit_jsonl, "a", encoding="utf-8") as f:
+                f.write(json.dumps(restore_entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
         return f"Put '{folder.name}' back as it was before the change."
 
     try:
@@ -1572,6 +1671,30 @@ def _run_job(job, name: str, who: str, speak=None, player=None) -> str:
             f"finishes. Nothing else.")
 
 
+def generate_build_questions(description: str, language: str = "python") -> list[str]:
+    """Generate 2-3 focused design and architecture questions to clarify user requirements."""
+    prompt = f"""You are a senior software architect. A developer wants to build a project with this description:
+"{description}" (target language: {language})
+
+Generate 2 to 3 concise, highly relevant questions to ask the user to clarify key requirements, architecture, preferred libraries/frameworks, UI/CLI preferences, or persistence needs, so that the project is built to the highest standard.
+
+Format as a JSON array of strings:
+["Question 1?", "Question 2?", "Question 3?"]
+Return ONLY the JSON array, no explanation."""
+    try:
+        from core import gemini
+        res = gemini.as_json(prompt, tier=gemini.FAST)
+        if isinstance(res, list) and res:
+            return [str(q).strip() for q in res if str(q).strip()][:3]
+    except Exception:
+        pass
+    return [
+        "What specific user workflows, core features, or outputs are most critical?",
+        "Do you have a preferred framework, architecture pattern, or UI/CLI preference?",
+        "Does the application need local persistence, a database, or external API integrations?",
+    ]
+
+
 def _start_build(description: str, language: str, project_name: str,
                  timeout: int, speak=None, player=None) -> str:
     """A new project, built in the background like a folder job."""
@@ -1598,6 +1721,24 @@ def dev_agent(
     description  = p.get("description", "").strip()
     mode         = str(p.get("mode") or "").strip().lower()
     folder       = str(p.get("folder") or "").strip()
+
+    from memory.config_manager import get_engineering_mode
+    if get_engineering_mode():
+        from core.repository.workspace import get_workspace
+        ws = get_workspace()
+        active_root = ws.root
+        if not active_root:
+            return "Engineering mode requires an active repository. Please set an active repository root first."
+        if folder:
+            try:
+                safe_folder = ws.resolve_safe_path(folder, must_exist=True)
+                folder = str(safe_folder)
+            except Exception as e:
+                return f"Access denied: folder must be inside active workspace ({e})."
+        else:
+            folder = str(active_root)
+            if mode != "status":
+                mode = "improve"
     if mode == "status":
         return _status_report()
     if mode == "improve" or (folder and mode != "build"):
@@ -1610,6 +1751,29 @@ def dev_agent(
 
     if not description:
         return "Please describe the project you want me to build, sir."
+
+    # Align on architecture and requirements before building new projects
+    ask_qs = bool(p.get("questions") or p.get("clarify"))
+    words = description.split()
+    if ask_qs or (len(words) <= 5 and not p.get("force") and not p.get("proceed")):
+        qs = generate_build_questions(description, language=language)
+        qs_lines = "\n".join(f"{i+1}. {q}" for i, q in enumerate(qs))
+        if player and hasattr(player, "show_content"):
+            try:
+                player.show_content(
+                    "Architecture & Requirements Alignment",
+                    f"To give you the best possible result for '{description}', please consider:\n\n{qs_lines}\n\n(You can reply with your preferences or say 'proceed' to build right away.)"
+                )
+            except Exception:
+                pass
+        msg = (
+            f"Before building '{description}', I have a few quick questions to align on your vision and give you the best result:\n"
+            f"{qs_lines}\n\n"
+            f"Tell me your preferences, or say 'proceed' to start building immediately."
+        )
+        if speak:
+            speak(f"Before I build {description}, I have a few quick questions to make sure you get the best result. Check them on your screen or tell me what you prefer.")
+        return msg
 
     return _start_build(description, language, project_name, timeout,
                         speak=speak, player=player)
@@ -1635,6 +1799,10 @@ TOOL = {
             "description": {
                 "type": "STRING",
                 "description": "build: what the project should do. improve: what to change in the folder, in the user's words"
+            },
+            "questions": {
+                "type": "BOOLEAN",
+                "description": "True to generate clarifying architectural/requirements questions for the user before building"
             },
             "mode": {
                 "type": "STRING",

@@ -40,7 +40,7 @@ from gui.theme import (
     qcol,
 )
 
-from gui.style import hud_font
+from gui.style import hud_font, px_font, with_alpha, blend
 
 
 class SetupOverlay(QWidget):
@@ -51,9 +51,9 @@ class SetupOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             SetupOverlay {{
-                background: rgba(0, 6, 10, 245);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: rgba(13, 19, 31, 248);
+                border: 1.5px solid rgba(255, 255, 255, 0.22);
+                border-radius: 10px;
             }}
         """)
 
@@ -190,21 +190,21 @@ class SetupOverlay(QWidget):
 
 class HueWheel(QWidget):
     """
-    Circular colour picker. The user drags the handle (small white circle)
-    around the wheel to choose from ALL hues. The filled circle in the centre
-    is a live preview of the selected colour.
+    Precision brutalist colour picker. The user drags the reticle handle around
+    the wheel to choose from all hues. The centre displays a crisp technical
+    reticle swatch with the selected colour and hex code.
     """
 
     hue_picked    = pyqtSignal(str)   # while dragging (live)
     hue_committed = pyqtSignal(str)   # when the handle is released
 
-    _RING = 16   # ring thickness (px)
+    _RING = 20   # ring thickness (px)
 
     def __init__(self, initial_hex: str = DEFAULT_UI_COLOR, parent=None):
         super().__init__(parent)
-        self.setFixedSize(148, 148)
+        self.setFixedSize(164, 164)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._hue  = 0.53
+        self._hue  = 0.386
         self._drag = False
         self.set_color(initial_hex)
 
@@ -220,7 +220,7 @@ class HueWheel(QWidget):
 
     # ── geometry helpers ─────────────────────────────────────────────────────
     def _ring_rect(self) -> QRectF:
-        m = self._RING / 2 + 3
+        m = self._RING / 2 + 6
         return QRectF(self.rect()).adjusted(m, m, -m, -m)
 
     def _hue_from_pos(self, pos: QPointF) -> float:
@@ -238,29 +238,89 @@ class HueWheel(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect   = self._ring_rect()
         center = rect.center()
+        cx, cy = center.x(), center.y()
 
+        # Dark glass circular backing disk (fast hardware raster)
+        disk_rect = rect.adjusted(-self._RING / 2 - 4, -self._RING / 2 - 4, self._RING / 2 + 4, self._RING / 2 + 4)
+        p.setBrush(QBrush(QColor(14, 20, 32, 215)))
+        p.setPen(QPen(qcol(C.BORDER_A), 1.5))
+        p.drawEllipse(disk_rect)
+
+        # Specular glint arc on disk
+        p.setPen(QPen(QColor(255, 255, 255, 55), 1.0))
+        p.drawArc(disk_rect.adjusted(2, 2, -2, -2), 45 * 16, 90 * 16)
+
+        # Outer structural border
+        out_r = rect.adjusted(-self._RING / 2, -self._RING / 2, self._RING / 2, self._RING / 2)
+        p.setPen(QPen(qcol(C.BORDER_B), 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(out_r)
+
+        # Technical quadrant reticle ticks
+        orad = out_r.width() / 2
+        p.setPen(QPen(qcol(C.BORDER_B), 1.5))
+        p.drawLine(QLineF(cx, cy - orad - 4, cx, cy - orad + 2))
+        p.drawLine(QLineF(cx, cy + orad - 2, cx, cy + orad + 4))
+        p.drawLine(QLineF(cx - orad - 4, cy, cx - orad + 2, cy))
+        p.drawLine(QLineF(cx + orad - 2, cy, cx + orad + 4, cy))
+
+        # Rainbow hue gradient ring
         grad = QConicalGradient(center, 0)
-        for i in range(0, 361, 20):
+        for i in range(0, 361, 15):
             grad.setColorAt(i / 360.0, QColor.fromHsvF((i % 360) / 360.0, 1.0, 1.0))
         p.setPen(QPen(QBrush(grad), self._RING))
-        p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(rect)
 
-        # centre preview circle
-        preview = QColor.fromHsvF(self._hue, 1.0, 1.0)
-        inner   = rect.adjusted(30, 30, -30, -30)
-        p.setPen(QPen(qcol(C.BORDER_B), 1))
-        p.setBrush(QBrush(preview))
-        p.drawEllipse(inner)
+        # Inner ring structural border
+        in_r = rect.adjusted(self._RING / 2, self._RING / 2, -self._RING / 2, -self._RING / 2)
+        p.setPen(QPen(qcol(C.BORDER_A), 1.5))
+        p.drawEllipse(in_r)
 
-        # draggable handle
+        # Centre frosted glass reticle swatch box
+        preview = QColor.fromHsvF(self._hue, 1.0, 1.0)
+        box_w, box_h = 58.0, 48.0
+        box = QRectF(cx - box_w / 2, cy - box_h / 2, box_w, box_h)
+
+        # Box background & sharp brutalist border
+        p.setPen(QPen(qcol(C.BORDER_B), 1.5))
+        p.setBrush(QBrush(QColor(12, 18, 28, 240)))
+        p.drawRoundedRect(box, 2, 2)
+
+        # Specular glint on box
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1.0))
+        p.drawLine(QLineF(box.left() + 4, box.top() + 1.2, box.right() - 4, box.top() + 1.2))
+
+        # Top half: color swatch
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(preview))
+        p.drawRoundedRect(QRectF(box.left() + 3, box.top() + 3, box_w - 6, box_h * 0.46), 2, 2)
+
+        # Bottom half: hex code readout
+        p.setFont(px_font(9, QFont.Weight.Bold, mono=True))
+        p.setPen(QPen(qcol(C.WHITE)))
+        hex_rect = QRectF(box.left(), box.top() + box_h * 0.48, box_w, box_h * 0.48)
+        p.drawText(hex_rect, Qt.AlignmentFlag.AlignCenter, self.color().upper())
+
+        # Draggable precision reticle handle
         r   = rect.width() / 2
         ang = self._hue * 2 * math.pi
         hx  = center.x() + r * math.cos(ang)
         hy  = center.y() - r * math.sin(ang)
-        p.setPen(QPen(QColor("#00060a"), 2))
-        p.setBrush(QBrush(QColor("#ffffff")))
-        p.drawEllipse(QPointF(hx, hy), 7.5, 7.5)
+
+        # Reticle crosshair lines
+        p.setPen(QPen(QColor("#ffffff"), 1.5))
+        p.drawLine(QLineF(hx - 11, hy, hx + 11, hy))
+        p.drawLine(QLineF(hx, hy - 11, hx, hy + 11))
+
+        # Reticle outer border
+        p.setPen(QPen(QColor("#000000"), 2.0))
+        p.setBrush(QBrush(preview))
+        p.drawEllipse(QPointF(hx, hy), 7.0, 7.0)
+
+        # Reticle inner white ring
+        p.setPen(QPen(QColor("#ffffff"), 2.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(hx, hy), 6.0, 6.0)
         p.end()
 
     # ── fare ─────────────────────────────────────────────────────────────────
@@ -286,7 +346,17 @@ class CustomizeOverlay(QWidget):
     """Floating overlay — change assistant name, user name, UI colour and voice."""
 
     saved = pyqtSignal(str, str, str, str)   # assistant_name, user_name, ui_color, voice
-    _OW, _OH = 400, 588
+    _OW, _OH = 420, 640
+
+    PRESETS = [
+        ("Green", "#00ff50"),
+        ("Cyan", "#00d4ff"),
+        ("Emerald", "#10b981"),
+        ("Violet", "#8b5cf6"),
+        ("Amber", "#f59e0b"),
+        ("Rose", "#f43f5e"),
+        ("Blue", "#3b82f6"),
+    ]
 
     def __init__(self, assistant_name="SYNC", user_name="",
                  ui_color=DEFAULT_UI_COLOR, voice="", parent=None):
@@ -294,66 +364,63 @@ class CustomizeOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             CustomizeOverlay {{
-                background: rgba(0, 6, 10, 245);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: rgba(13, 19, 31, 248);
+                border: 1.5px solid rgba(255, 255, 255, 0.22);
+                border-radius: 10px;
             }}
         """)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(24, 18, 24, 18)
+        lay.setContentsMargins(22, 18, 22, 18)
         lay.setSpacing(8)
 
         def _lbl(txt, fs=9, bold=False, color=C.PRI, align=Qt.AlignmentFlag.AlignCenter):
             w = QLabel(txt); w.setAlignment(align)
-            w.setFont(hud_font(fs,
-                            QFont.Weight.Bold if bold else QFont.Weight.Normal))
+            w.setFont(px_font(fs, QFont.Weight.Bold if bold else QFont.Weight.DemiBold, spacing=0.6))
             w.setStyleSheet(f"color: {color}; background: transparent;")
             return w
 
-        _fs = (f"QLineEdit {{ background: #000d12; color: {C.TEXT}; "
-               f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}"
-               f"QLineEdit:focus {{ border: 1px solid {C.PRI}; }}")
+        _fs = (f"QLineEdit {{ background: rgba(20, 29, 44, 0.75); color: {C.TEXT}; "
+               f"border: 1.5px solid {C.BORDER_A}; border-radius: 6px; padding: 6px 10px; font-weight: bold; }}"
+               f"QLineEdit:focus {{ border: 1.5px solid {C.PRI}; background: rgba(30, 44, 66, 0.88); }}")
 
-        lay.addWidget(_lbl("⚙  CUSTOMISE ASSISTANT", 12, True))
+        lay.addWidget(_lbl("◈  [ CONFIG // UI_PREFERENCES ]", 12, True, color=C.WHITE, align=Qt.AlignmentFlag.AlignLeft))
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        sep.setStyleSheet(f"color: {C.BORDER_A}; margin: 2px 0;")
         lay.addWidget(sep)
 
-        lay.addWidget(_lbl("ASSISTANT NAME", 8, color=C.TEXT_DIM,
+        lay.addWidget(_lbl("ASSISTANT NAME", 8.5, color=C.TEXT_MED,
                             align=Qt.AlignmentFlag.AlignLeft))
         self._name_input = QLineEdit(assistant_name)
-        self._name_input.setFont(hud_font(10))
+        self._name_input.setFont(px_font(11, QFont.Weight.Bold))
         self._name_input.setFixedHeight(32)
         self._name_input.setStyleSheet(_fs)
         lay.addWidget(self._name_input)
 
-        lay.addSpacing(4)
-        lay.addWidget(_lbl("YOUR NAME  (leave blank for default sir / efendim)", 8,
-                            color=C.TEXT_DIM, align=Qt.AlignmentFlag.AlignLeft))
+        lay.addSpacing(3)
+        lay.addWidget(_lbl("USER IDENTIFIER  (leave blank for default sir / efendim)", 8.5,
+                            color=C.TEXT_MED, align=Qt.AlignmentFlag.AlignLeft))
         self._user_input = QLineEdit(user_name)
         self._user_input.setPlaceholderText("e.g.  Tony   (leave blank for auto)")
-        self._user_input.setFont(hud_font(10))
+        self._user_input.setFont(px_font(11, QFont.Weight.Bold))
         self._user_input.setFixedHeight(32)
         self._user_input.setStyleSheet(_fs)
         lay.addWidget(self._user_input)
 
         # ── Assistant voice — Gemini prebuilt voices ─────────────────────────
-        # Names are language-neutral proper nouns, so the row reads the same in
-        # every locale. Selecting one and applying rebuilds the Live session.
         from memory.config_manager import AVAILABLE_VOICES, DEFAULT_VOICE
-        lay.addSpacing(4)
-        lay.addWidget(_lbl("ASSISTANT VOICE", 8, color=C.TEXT_DIM,
+        lay.addSpacing(3)
+        lay.addWidget(_lbl("ASSISTANT VOICE", 8.5, color=C.TEXT_MED,
                             align=Qt.AlignmentFlag.AlignLeft))
         self._sel_voice   = (voice or DEFAULT_VOICE)
         if self._sel_voice not in AVAILABLE_VOICES:
             self._sel_voice = DEFAULT_VOICE
         self._voice_btns: dict[str, QPushButton] = {}
-        voice_row = QHBoxLayout(); voice_row.setSpacing(4)
+        voice_row = QHBoxLayout(); voice_row.setSpacing(5)
         for _v in AVAILABLE_VOICES:
-            b = QPushButton(_v)
+            b = QPushButton(_v.upper())
             b.setCheckable(True)
             b.setFixedHeight(28)
-            b.setFont(hud_font(8, QFont.Weight.Bold))
+            b.setFont(px_font(9.5, QFont.Weight.Bold))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _=False, name=_v: self._on_voice_pick(name))
             self._voice_btns[_v] = b
@@ -361,22 +428,22 @@ class CustomizeOverlay(QWidget):
         lay.addLayout(voice_row)
         self._refresh_voice_btns()
 
-        # ── UI colour — colour wheel ─────────────────────────────────────────
-        lay.addSpacing(4)
+        # ── UI colour — colour wheel & curated presets ───────────────────────
+        lay.addSpacing(3)
         clr_hdr = QHBoxLayout()
-        clr_hdr.addWidget(_lbl("UI COLOUR  —  drag the handle", 8,
-                               color=C.TEXT_DIM, align=Qt.AlignmentFlag.AlignLeft))
+        clr_hdr.addWidget(_lbl("THEME COLOUR  —  curated presets or custom wheel", 8.5,
+                               color=C.TEXT_MED, align=Qt.AlignmentFlag.AlignLeft))
         clr_hdr.addStretch()
         df_btn = QPushButton("DEFAULT")
-        df_btn.setFixedSize(64, 20)
-        df_btn.setFont(hud_font(7, QFont.Weight.Bold))
+        df_btn.setFixedSize(68, 22)
+        df_btn.setFont(px_font(8.5, QFont.Weight.Bold))
         df_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         df_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER}; border-radius: 3px;
+                background: rgba(20, 28, 42, 0.70); color: {C.TEXT_MED};
+                border: 1.5px solid {C.BORDER_A}; border-radius: 4px;
             }}
-            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.PRI}; }}
         """)
         df_btn.clicked.connect(lambda: self._set_color(DEFAULT_UI_COLOR))
         clr_hdr.addWidget(df_btn)
@@ -386,6 +453,29 @@ class CustomizeOverlay(QWidget):
         self._sel_color     = self._initial_color
         self.on_preview     = None   # callable(hex) — live preview; MainWindow wires it
 
+        # Curated presets row
+        presets_row = QHBoxLayout()
+        presets_row.setSpacing(6)
+        self._preset_btns: list[tuple[str, QPushButton]] = []
+        for name, hx in self.PRESETS:
+            pb = QPushButton()
+            pb.setFixedSize(24, 24)
+            pb.setCursor(Qt.CursorShape.PointingHandCursor)
+            pb.setToolTip(f"{name} ({hx})")
+            pb.setStyleSheet(f"""
+                QPushButton {{
+                    background: {hx}; border: 1.5px solid rgba(255, 255, 255, 0.35);
+                    border-radius: 2px;
+                }}
+                QPushButton:hover {{ border: 2px solid #ffffff; }}
+                QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
+            """)
+            pb.clicked.connect(lambda _=False, color_hex=hx: self._set_color(color_hex, update_wheel=True, preview=True))
+            presets_row.addWidget(pb)
+            self._preset_btns.append((hx, pb))
+        presets_row.addStretch()
+        lay.addLayout(presets_row)
+
         self._wheel = HueWheel(self._sel_color)
         wheel_row = QHBoxLayout()
         wheel_row.addStretch(); wheel_row.addWidget(self._wheel); wheel_row.addStretch()
@@ -394,8 +484,8 @@ class CustomizeOverlay(QWidget):
         self._wheel.hue_committed.connect(self._on_wheel_commit)
 
         self._hex_input = QLineEdit(self._sel_color)
-        self._hex_input.setPlaceholderText("#00d4ff   (custom hex colour)")
-        self._hex_input.setFont(hud_font(10))
+        self._hex_input.setPlaceholderText("#00FF50   (custom hex colour)")
+        self._hex_input.setFont(px_font(10.5, QFont.Weight.Bold, mono=True))
         self._hex_input.setFixedHeight(28)
         self._hex_input.setStyleSheet(_fs)
         self._hex_input.textEdited.connect(self._on_hex_edited)
@@ -404,30 +494,34 @@ class CustomizeOverlay(QWidget):
         lay.addSpacing(6)
         btn_row = QHBoxLayout(); btn_row.setSpacing(8)
 
-        save_btn = QPushButton("▸  APPLY CHANGES")
+        save_btn = QPushButton("APPLY CHANGES")
         save_btn.setFixedHeight(34)
-        save_btn.setFont(hud_font(9, QFont.Weight.Bold))
+        save_btn.setFont(px_font(10.5, QFont.Weight.Bold))
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: {C.PRI};
-                border: 1px solid {C.PRI_DIM}; border-radius: 3px;
+                background: {C.PRI}; color: #000000;
+                border: 2px solid #ffffff; border-radius: 2px; font-weight: 800;
+                letter-spacing: 0.8px;
             }}
-            QPushButton:hover {{ background: {C.PRI_GHO}; border: 1px solid {C.PRI}; }}
+            QPushButton:hover {{ background: #ffffff; border-color: {C.PRI}; color: #000000; }}
+            QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
         """)
         save_btn.clicked.connect(self._save)
-        btn_row.addWidget(save_btn)
+        btn_row.addWidget(save_btn, stretch=1)
 
         cancel_btn = QPushButton("CANCEL")
         cancel_btn.setFixedHeight(34)
-        cancel_btn.setFont(hud_font(9))
+        cancel_btn.setFont(px_font(10.5, QFont.Weight.Bold))
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER}; border-radius: 3px;
+                background: rgba(18, 26, 40, 0.90); color: {C.TEXT_MED};
+                border: 1.5px solid {C.BORDER_A}; border-radius: 2px; font-weight: 800;
+                letter-spacing: 0.8px;
             }}
-            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+            QPushButton:hover {{ color: #ffffff; border-color: {C.BORDER_B}; background: rgba(28, 40, 60, 0.95); }}
+            QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
         """)
         cancel_btn.clicked.connect(self._cancel)
         btn_row.addWidget(cancel_btn)
@@ -439,20 +533,24 @@ class CustomizeOverlay(QWidget):
         self._refresh_voice_btns()
 
     def _refresh_voice_btns(self):
-        """Highlight the selected voice pill; dim the rest."""
+        """Highlight the selected voice button; dim the rest."""
         for name, b in self._voice_btns.items():
             on = (name == self._sel_voice)
             b.setChecked(on)
             if on:
                 b.setStyleSheet(f"""
-                    QPushButton {{ background: {C.PRI_GHO}; color: {C.PRI};
-                        border: 1px solid {C.PRI}; border-radius: 3px; }}
+                    QPushButton {{ background: {C.PRI}; color: #000000;
+                        border: 2px solid #ffffff; border-radius: 2px; font-weight: 800;
+                        letter-spacing: 0.8px; }}
+                    QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
                 """)
             else:
                 b.setStyleSheet(f"""
-                    QPushButton {{ background: transparent; color: {C.TEXT_MED};
-                        border: 1px solid {C.BORDER}; border-radius: 3px; }}
-                    QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+                    QPushButton {{ background: rgba(18, 26, 40, 0.85); color: {C.TEXT_MED};
+                        border: 1.5px solid {C.BORDER_A}; border-radius: 2px; font-weight: 700;
+                        letter-spacing: 0.8px; }}
+                    QPushButton:hover {{ color: #ffffff; border-color: {C.PRI}; }}
+                    QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
                 """)
 
     # ── colour flow ──────────────────────────────────────────────────────────
@@ -510,9 +608,9 @@ class PluginManagerOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             PluginManagerOverlay {{
-                background: rgba(0, 6, 10, 245);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: rgba(13, 19, 31, 248);
+                border: 1.5px solid rgba(255, 255, 255, 0.22);
+                border-radius: 10px;
             }}
         """)
         self.setFixedWidth(self._OW)
@@ -541,14 +639,15 @@ class PluginManagerOverlay(QWidget):
         lay.addSpacing(4)
         close_btn = QPushButton("CLOSE")
         close_btn.setFixedHeight(30)
-        close_btn.setFont(hud_font(9))
+        close_btn.setFont(hud_font(9, QFont.Weight.Bold))
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER}; border-radius: 3px;
+                background: rgba(18, 26, 40, 0.85); color: {C.TEXT_MED};
+                border: 1.5px solid {C.BORDER_A}; border-radius: 2px; font-weight: 700;
             }}
-            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+            QPushButton:hover {{ color: #ffffff; border-color: {C.BORDER_B}; background: rgba(28, 40, 60, 0.95); }}
+            QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
         """)
         close_btn.clicked.connect(self.hide)
         lay.addWidget(close_btn)
@@ -589,19 +688,21 @@ class PluginManagerOverlay(QWidget):
             btn.setText("ON")
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: #001a08; color: {C.GREEN};
-                    border: 1px solid {C.GREEN_D}; border-radius: 3px;
+                    background: {C.GREEN}; color: #000000;
+                    border: 2px solid #ffffff; border-radius: 2px; font-weight: 800;
                 }}
-                QPushButton:hover {{ background: #002010; }}
+                QPushButton:hover {{ background: #ffffff; color: #000000; border-color: {C.GREEN}; }}
+                QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
             """)
         else:
             btn.setText("OFF")
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: transparent; color: {C.TEXT_DIM};
-                    border: 1px solid {C.BORDER}; border-radius: 3px;
+                    background: rgba(18, 26, 40, 0.85); color: {C.TEXT_DIM};
+                    border: 1.5px solid {C.BORDER_A}; border-radius: 2px; font-weight: 700;
                 }}
-                QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+                QPushButton:hover {{ color: #ffffff; border-color: {C.BORDER_B}; background: rgba(28, 40, 60, 0.95); }}
+                QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
             """)
 
     def _toggle(self, name: str, btn: QPushButton):
@@ -651,9 +752,9 @@ class ConfirmBanner(_HudOverlay):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             ConfirmBanner {{
-                background: rgba(14, 3, 0, 250);
-                border: 1px solid {C.ACC};
-                border-radius: 6px;
+                background: rgba(14, 20, 32, 248);
+                border: 1.5px solid {C.ACC};
+                border-radius: 10px;
             }}
         """)
         self.setFixedWidth(self._OW)
@@ -687,21 +788,24 @@ class ConfirmBanner(_HudOverlay):
         yes.setFont(hud_font(9, QFont.Weight.Bold))
         yes.setCursor(Qt.CursorShape.PointingHandCursor)
         yes.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: {C.ACC};
-                border: 1px solid {C.ACC}; border-radius: 3px; }}
-            QPushButton:hover {{ background: rgba(255,107,0,40); }}
+            QPushButton {{ background: {C.ACC}; color: #000000;
+                border: 2px solid #ffffff; border-radius: 2px; font-weight: 800;
+                letter-spacing: 0.6px; }}
+            QPushButton:hover {{ background: #ffffff; color: #000000; border-color: {C.ACC}; }}
+            QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
         """)
         yes.clicked.connect(lambda: self.answered.emit(True))
         row.addWidget(yes)
 
         no = QPushButton("CANCEL")
         no.setFixedHeight(32)
-        no.setFont(hud_font(9))
+        no.setFont(hud_font(9, QFont.Weight.Bold))
         no.setCursor(Qt.CursorShape.PointingHandCursor)
         no.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER}; border-radius: 3px; }}
-            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+            QPushButton {{ background: rgba(18, 26, 40, 0.90); color: {C.TEXT_MED};
+                border: 1.5px solid {C.BORDER_A}; border-radius: 2px; font-weight: 700; }}
+            QPushButton:hover {{ color: #ffffff; border-color: {C.BORDER_B}; background: rgba(28, 40, 60, 0.95); }}
+            QPushButton:pressed {{ margin-top: 2px; margin-left: 2px; }}
         """)
         no.clicked.connect(lambda: self.answered.emit(False))
         row.addWidget(no)
@@ -711,6 +815,183 @@ class ConfirmBanner(_HudOverlay):
         # safe answer wins.
         no.setDefault(True)
         no.setFocus()
+
+
+class IdeChoiceOverlay(_HudOverlay):
+    """Option popup for choosing an IDE when multiple editors are detected.
+
+    Follows the exact design, typography and theme of SYNC's HUD overlays.
+    Emits ide_chosen(ide_id) on user click or selection.
+    Can also be answered by voice (handled by the window/action listener).
+    """
+
+    ide_chosen = pyqtSignal(str)
+    cancelled  = pyqtSignal()
+    _OW = 460
+
+    def __init__(self, folder_path: str, ides: list, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            IdeChoiceOverlay {{
+                background: rgba(14, 20, 32, 248);
+                border: 1.5px solid {C.ACC};
+                border-radius: 10px;
+            }}
+        """)
+        self.setFixedWidth(self._OW)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(10)
+
+        hdr = QLabel("🛠  SELECT IDE FOR REAL-TIME CODING")
+        hdr.setFont(hud_font(11, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+        lay.addWidget(hdr)
+
+        folder_name = Path(folder_path).name or folder_path
+        sub = QLabel(f"Folder: {folder_name}\nMultiple editors detected. Click your preferred IDE below or say its name:")
+        sub.setWordWrap(True)
+        sub.setFont(hud_font(9))
+        sub.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+        lay.addWidget(sub)
+
+        # Buttons for each detected IDE
+        for ide_item in ides:
+            if isinstance(ide_item, dict):
+                ide_id = ide_item.get("id", "")
+                name = ide_item.get("name", ide_id)
+                icon = ide_item.get("icon", "💻")
+            else:
+                ide_id = getattr(ide_item, "id", str(ide_item))
+                name = getattr(ide_item, "name", ide_id)
+                icon = getattr(ide_item, "icon", "💻")
+
+            btn = QPushButton(f"{icon}  {name}")
+            btn.setFixedHeight(34)
+            btn.setFont(hud_font(9, QFont.Weight.Bold))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {C.TEXT};
+                    border: 1px solid {C.BORDER}; border-radius: 4px;
+                    padding-left: 10px; text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: rgba(255,107,0,35);
+                    color: {C.ACC}; border-color: {C.ACC};
+                }}
+            """)
+            btn.clicked.connect(lambda _, i=ide_id: self.ide_chosen.emit(i))
+            lay.addWidget(btn)
+
+        # Cancel button
+        cancel_btn = QPushButton("CANCEL")
+        cancel_btn.setFixedHeight(28)
+        cancel_btn.setFont(hud_font(8))
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_DIM};
+                border: 1px solid {C.BORDER}; border-radius: 3px;
+            }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+        """)
+        cancel_btn.clicked.connect(self.cancelled.emit)
+        lay.addWidget(cancel_btn)
+
+
+class CodeAuditOverlay(_HudOverlay):
+    """Real-time code change audit trail viewer overlay."""
+
+    _OW = 540
+
+    def __init__(self, entries: list, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            CodeAuditOverlay {{
+                background: rgba(14, 20, 32, 248);
+                border: 1.5px solid {C.ACC};
+                border-radius: 10px;
+            }}
+        """)
+        self.setFixedWidth(self._OW)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(8)
+
+        hdr_row = QHBoxLayout()
+        hdr = QLabel("⚡  REAL-TIME CODE AUDIT")
+        hdr.setFont(hud_font(11, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+        hdr_row.addWidget(hdr)
+        hdr_row.addStretch()
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setFont(hud_font(9, QFont.Weight.Bold))
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
+        close_btn.clicked.connect(self.hide)
+        hdr_row.addWidget(close_btn)
+        lay.addLayout(hdr_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setMaximumHeight(350)
+
+        cont = QWidget()
+        cont_lay = QVBoxLayout(cont)
+        cont_lay.setContentsMargins(0, 0, 0, 0)
+        cont_lay.setSpacing(6)
+
+        if not entries:
+            empty_lbl = QLabel("No real-time code modifications recorded in this session.")
+            empty_lbl.setFont(hud_font(9))
+            empty_lbl.setStyleSheet(f"color: {C.TEXT_MED};")
+            cont_lay.addWidget(empty_lbl)
+        else:
+            for e in reversed(entries):
+                if isinstance(e, dict):
+                    ts = e.get("timestamp", "")
+                    fp = e.get("file_path", "")
+                    act = e.get("action", "").upper()
+                    ds = e.get("diff_summary", "")
+                    vs = e.get("voice_summary", "")
+                    ide = e.get("ide", "")
+                else:
+                    ts = getattr(e, "timestamp", "")
+                    fp = getattr(e, "file_path", "")
+                    act = getattr(e, "action", "").upper()
+                    ds = getattr(e, "diff_summary", "")
+                    vs = getattr(e, "voice_summary", "")
+                    ide = getattr(e, "ide", "")
+
+                item_w = QWidget()
+                item_w.setStyleSheet(f"background: rgba(255,255,255,5); border-radius: 4px; padding: 4px;")
+                iw_lay = QVBoxLayout(item_w)
+                iw_lay.setContentsMargins(6, 4, 6, 4)
+                iw_lay.setSpacing(2)
+
+                top_lbl = QLabel(f"<b>{act}</b>: <font color='{C.ACC}'>{fp}</font> · <font color='{C.TEXT_DIM}'>{ts}</font>")
+                top_lbl.setFont(hud_font(8))
+                top_lbl.setTextFormat(Qt.TextFormat.RichText)
+                iw_lay.addWidget(top_lbl)
+
+                sub_lbl = QLabel(f"{ds}  |  {vs}" + (f"  [Live in {ide}]" if ide else ""))
+                sub_lbl.setFont(hud_font(8))
+                sub_lbl.setStyleSheet(f"color: {C.TEXT_MED};")
+                sub_lbl.setWordWrap(True)
+                iw_lay.addWidget(sub_lbl)
+
+                cont_lay.addWidget(item_w)
+
+        scroll.setWidget(cont)
+        lay.addWidget(scroll)
 
 
 class AudioDeviceOverlay(_HudOverlay):
@@ -749,9 +1030,9 @@ class AudioDeviceOverlay(_HudOverlay):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             AudioDeviceOverlay {{
-                background: rgba(0, 6, 10, 245);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: rgba(13, 19, 31, 248);
+                border: 1.5px solid rgba(255, 255, 255, 0.22);
+                border-radius: 10px;
             }}
         """)
         self.setFixedWidth(self._OW)
@@ -1088,9 +1369,9 @@ class MemoryOverlay(_HudOverlay):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             MemoryOverlay {{
-                background: rgba(0, 6, 10, 246);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: rgba(13, 19, 31, 248);
+                border: 1.5px solid rgba(255, 255, 255, 0.22);
+                border-radius: 10px;
             }}
         """)
         self.setFixedWidth(self._OW)
@@ -1403,9 +1684,9 @@ class PluginSettingsOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             PluginSettingsOverlay {{
-                background: rgba(0, 6, 10, 245);
+                background: rgba(14, 17, 23, 248);
                 border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                border-radius: 10px;
             }}
         """)
         self._sections = sections or []

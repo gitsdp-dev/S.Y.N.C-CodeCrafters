@@ -178,28 +178,339 @@ def _format_ddg(query: str, results: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-def _format_news(query: str, results: list[dict]) -> str:
-    if not results:
-        return f"No news found for: {query}"
+# ── Developer, Tech & GitHub News Outlets Configuration ──────────────────────
+# Multi-tiered intelligence network across three dedicated developer channels:
+# 1. Tech News (Industry shifts, major platforms, enterprise systems, AI hardware)
+# 2. Development News (Software architecture, dev tooling, cloud infra, security/CVEs)
+# 3. GitHub Updates (Platform changelogs, GitHub Actions, Copilot, open-source releases)
+#
+# Anti-lockout architecture:
+# Tier 1: Curated priority outlets across Tech, Dev, and GitHub categories.
+# Tier 2: Adaptive broad developer ecosystem search for specific/niche libraries & tools.
+# Tier 3: Grounded Gemini technical synthesis fallback.
 
-    lines = [f"Latest news: {query}\n"]
-    for i, r in enumerate(results, 1):
-        title = r.get("title", "")
+CATEGORY_TECH = "tech"
+CATEGORY_DEV = "dev"
+CATEGORY_GITHUB = "github"
+CATEGORY_ALL = "all"
+
+NEWS_CATEGORIES = {
+    CATEGORY_TECH: {
+        "title": "Tech News",
+        "label": "TECH RADAR",
+        "description": "Breaking technology news, industry shifts, and hardware/AI ecosystem updates",
+        "site_query": (
+            "site:techcrunch.com OR site:wired.com OR site:technewsworld.com OR "
+            "site:cnet.com OR site:dailytechnewsshow.com OR site:arstechnica.com OR "
+            "site:theverge.com OR site:venturebeat.com OR site:zdnet.com OR "
+            "\"Bloomberg Tech\" OR \"Daily Tech News Show\""
+        ),
+    },
+    CATEGORY_DEV: {
+        "title": "Development News",
+        "label": "DEV RADAR",
+        "description": "Software engineering, system architectures, developer tooling, cloud infra, and security CVEs",
+        "site_query": (
+            "site:thenewstack.io OR site:infoq.com OR site:bleepingcomputer.com OR "
+            "site:dev.to OR site:stackoverflow.blog OR site:news.ycombinator.com OR "
+            "site:sdtimes.com OR site:dzone.com"
+        ),
+    },
+    CATEGORY_GITHUB: {
+        "title": "GitHub Updates",
+        "label": "GITHUB RADAR",
+        "description": "GitHub changelogs, platform features, GitHub Actions updates, and open source releases",
+        "site_query": (
+            "site:github.blog changelog OR site:github.blog OR "
+            "\"GitHub Changelog\" OR \"GitHub Releases\" OR \"GitHub Copilot\""
+        ),
+    },
+}
+
+# Compatibility alias for external callers
+TECH_NEWS_SITE_QUERY = NEWS_CATEGORIES[CATEGORY_TECH]["site_query"]
+
+# Curated outlets with category tags and domain matching
+TECH_NEWS_OUTLETS = [
+    # Top Technology Outlets
+    {
+        "name": "Bloomberg Tech",
+        "url": "https://m.youtube.com/channel/UCrM7B7SL_g1edFOnmj-SDKg",
+        "domains": ("bloomberg.com", "youtube.com/channel/UCrM7B7SL_g1edFOnmj-SDKg", "youtube.com/@BloombergTechnology"),
+        "match_keys": ("bloomberg tech", "bloomberg technology", "bloomberg tv", "bloomberg"),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "Daily Tech News Show",
+        "url": "https://www.youtube.com/dailytechnewsshow",
+        "domains": ("dailytechnewsshow.com", "youtube.com/dailytechnewsshow", "youtube.com/@dailytechnewsshow"),
+        "match_keys": ("daily tech news show", "dtns", "dailytechnewsshow"),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "TechNewsWorld",
+        "url": "https://www.technewsworld.com/",
+        "domains": ("technewsworld.com",),
+        "match_keys": ("technewsworld", "tech news world"),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "TechCrunch",
+        "url": "https://techcrunch.com/",
+        "domains": ("techcrunch.com",),
+        "match_keys": ("techcrunch",),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "CNET",
+        "url": "https://www.cnet.com/tech/",
+        "domains": ("cnet.com",),
+        "match_keys": ("cnet",),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "WIRED",
+        "url": "https://www.wired.com/",
+        "domains": ("wired.com",),
+        "match_keys": ("wired", "wired news"),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "Ars Technica",
+        "url": "https://arstechnica.com/",
+        "domains": ("arstechnica.com",),
+        "match_keys": ("ars technica", "arstechnica"),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "The Verge",
+        "url": "https://theverge.com/tech",
+        "domains": ("theverge.com",),
+        "match_keys": ("the verge", "verge"),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "VentureBeat",
+        "url": "https://venturebeat.com/",
+        "domains": ("venturebeat.com",),
+        "match_keys": ("venturebeat",),
+        "category": CATEGORY_TECH,
+    },
+    {
+        "name": "ZDNET",
+        "url": "https://www.zdnet.com/",
+        "domains": ("zdnet.com",),
+        "match_keys": ("zdnet",),
+        "category": CATEGORY_TECH,
+    },
+
+    # Development & Architecture Outlets
+    {
+        "name": "The New Stack",
+        "url": "https://thenewstack.io/",
+        "domains": ("thenewstack.io",),
+        "match_keys": ("the new stack", "thenewstack"),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "InfoQ",
+        "url": "https://www.infoq.com/",
+        "domains": ("infoq.com",),
+        "match_keys": ("infoq",),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "Hacker News",
+        "url": "https://news.ycombinator.com/",
+        "domains": ("news.ycombinator.com", "ycombinator.com"),
+        "match_keys": ("hacker news", "y combinator"),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "BleepingComputer",
+        "url": "https://www.bleepingcomputer.com/",
+        "domains": ("bleepingcomputer.com",),
+        "match_keys": ("bleepingcomputer", "bleeping computer"),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "Dev.to",
+        "url": "https://dev.to/",
+        "domains": ("dev.to",),
+        "match_keys": ("dev.to",),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "Stack Overflow Blog",
+        "url": "https://stackoverflow.blog/",
+        "domains": ("stackoverflow.blog",),
+        "match_keys": ("stack overflow", "stackoverflow"),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "SD Times",
+        "url": "https://sdtimes.com/",
+        "domains": ("sdtimes.com",),
+        "match_keys": ("sd times", "sdtimes"),
+        "category": CATEGORY_DEV,
+    },
+    {
+        "name": "DZone",
+        "url": "https://dzone.com/",
+        "domains": ("dzone.com",),
+        "match_keys": ("dzone",),
+        "category": CATEGORY_DEV,
+    },
+
+    # GitHub Updates & Open Source Releases
+    {
+        "name": "GitHub Changelog",
+        "url": "https://github.blog/changelog/",
+        "domains": ("github.blog/changelog", "github.com/changelog"),
+        "match_keys": ("github changelog",),
+        "category": CATEGORY_GITHUB,
+    },
+    {
+        "name": "GitHub Blog",
+        "url": "https://github.blog/",
+        "domains": ("github.blog", "github.com"),
+        "match_keys": ("github blog", "github"),
+        "category": CATEGORY_GITHUB,
+    },
+]
+
+# Domains strictly excluded from Tier 2 broad search to avoid non-tech tabloids
+_NON_TECH_BLOCKED_DOMAINS = {
+    "tmz.com", "pagesix.com", "dailymail.co.uk", "usmagazine.com", "people.com",
+    "eonline.com", "espn.com", "hollywoodreporter.com", "variety.com",
+    "foxnews.com", "breitbart.com", "thesun.co.uk", "mirror.co.uk", "nydailynews.com",
+    "etonline.com", "perezhilton.com", "radaronline.com", "nationalenquirer.com",
+    "billboard.com", "rollingstone.com", "buzzfeed.com"
+}
+
+
+def _detect_news_category(query: str, requested_category: str | None = None) -> str:
+    """
+    Resolves category from explicit parameter or auto-detects from query keywords.
+    Returns: 'tech', 'dev', 'github', or 'all'.
+    """
+    if requested_category:
+        cat = requested_category.strip().lower()
+        if cat in (CATEGORY_TECH, "technews", "tech news", "technology", "tech"):
+            return CATEGORY_TECH
+        if cat in (CATEGORY_DEV, "devnews", "development", "development news", "dev news", "engineering"):
+            return CATEGORY_DEV
+        if cat in (CATEGORY_GITHUB, "github updates", "github news", "git", "changelog"):
+            return CATEGORY_GITHUB
+        if cat in (CATEGORY_ALL, "any", "combined", "all"):
+            return CATEGORY_ALL
+
+    q = (query or "").lower()
+    if any(k in q for k in ("github", "git ", "changelog", "copilot", "actions lockfile", "gh-", "github updates")):
+        return CATEGORY_GITHUB
+    if any(k in q for k in ("dev", "develop", "development news", "architecture", "cve", "vulnerability",
+                           "kubernetes", "docker", "compiler", "framework", "database", "api", "backend",
+                           "frontend", "rust", "python", "golang", "typescript", "linux", "cloud native")):
+        return CATEGORY_DEV
+
+    return CATEGORY_TECH
+
+
+def _match_tech_outlet(item: dict) -> str | None:
+    """
+    Check if a news item matches one of our curated tech, dev, or github outlets.
+    Returns canonical outlet name or None.
+    """
+    source = (item.get("source") or "").lower()
+    url = (item.get("url") or "").lower()
+    title = (item.get("title") or "").lower()
+
+    for outlet in TECH_NEWS_OUTLETS:
+        for domain in outlet["domains"]:
+            if domain in url:
+                return outlet["name"]
+        for key in outlet["match_keys"]:
+            if key in source:
+                return outlet["name"]
+        for key in outlet["match_keys"]:
+            if f"- {key}" in title or f"| {key}" in title or f"[{key}]" in title:
+                return outlet["name"]
+
+    return None
+
+
+def _is_non_tech_blocked(item: dict) -> bool:
+    """Filter out known tabloid/sports/entertainment non-tech domains."""
+    url = (item.get("url") or "").lower()
+    source = (item.get("source") or "").lower()
+    for bad in _NON_TECH_BLOCKED_DOMAINS:
+        if bad in url or bad in source:
+            return True
+    return False
+
+
+def _extract_source_name(item: dict) -> str:
+    """Extract a clean publisher or domain name for Tier 2 ecosystem results."""
+    curated = _match_tech_outlet(item)
+    if curated:
+        return curated
+    src = (item.get("source") or "").strip()
+    if src:
+        return src
+    url = item.get("url", "")
+    if url:
+        try:
+            import urllib.parse
+            netloc = urllib.parse.urlparse(url).netloc
+            return netloc.replace("www.", "")
+        except Exception:
+            pass
+    return "Ecosystem"
+
+
+def _format_news(query: str, results: list[dict], category: str = CATEGORY_TECH) -> str:
+    # Filter out non-tech sources and deduplicate by URL
+    seen_urls = set()
+    valid_items: list[tuple[dict, str]] = []
+
+    for r in results:
+        url = (r.get("url") or "").strip()
+        if url and url in seen_urls:
+            continue
+        if _is_non_tech_blocked(r):
+            continue
+        if url:
+            seen_urls.add(url)
+        outlet = _extract_source_name(r)
+        valid_items.append((r, outlet))
+
+    if not valid_items:
+        return f"No verified developer/tech news found for: {query}."
+
+    cat_meta = NEWS_CATEGORIES.get(category, {"title": "Tech & Developer News", "label": "TECH RADAR"})
+    cat_title = cat_meta["title"]
+
+    lines = [
+        f"[{cat_meta['label']}] {cat_title}: {query}",
+        "Focus: Systems, Architecture, Developer Impact & Tech Ecosystem\n",
+    ]
+    for i, (r, outlet) in enumerate(valid_items, 1):
+        title = r.get("title", "").strip()
         if not title:
             continue
-        src = f"  [{r['source']}]" if r.get("source") else ""
-        lines.append(f"{i}. {title}{src}")
-        if r.get("snippet"):
-            lines.append(f"   {r['snippet'][:140]}")
+        lines.append(f"{i}. [{outlet}] {title}")
+        snippet = (r.get("snippet") or "").strip()
+        if snippet:
+            lines.append(f"   Technical Brief: {snippet[:180]}")
         if r.get("url"):
-            lines.append(f"   {r['url']}")
+            lines.append(f"   Source: {r['url']}")
         lines.append("")
     return "\n".join(lines).strip()
 
 
 # ── Briefing helper ────────────────────────────────────────────────────────────
 
-def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
+def _gemini_headlines(n: int = 5, category: str = CATEGORY_TECH) -> tuple[list[str], str]:
     """
     Fetches current headlines via Gemini grounded search.
     Optimised for speed: minimal prompt + strict token cap.
@@ -208,8 +519,14 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
     import re
     from core import gemini
 
+    cat_name = NEWS_CATEGORIES.get(category, {}).get("title", "Developer & Tech News")
+    prompt = (
+        f"Current {cat_name}: {n} headlines strictly covering software engineering, systems, "
+        "cloud infrastructure, developer tools, or AI platforms. "
+        "Numbered list, titles only, prefixed with [Outlet Name]."
+    )
     response = gemini.call(
-        f"Current world news: {n} headlines. Numbered list, titles only.",
+        prompt,
         tier=gemini.SEARCH,
         config={"tools": [{"google_search": {}}]},
         timeout_ms=30_000,
@@ -227,7 +544,6 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
         line = line.strip()
         if not line:
             continue
-        # Only accept lines that begin with a number — skips preamble/closing sentences
         if not re.match(r'^[\d]+[.\)\-]', line):
             continue
         clean = re.sub(r'^[\d]+[.\)\-]\s*', '', line)
@@ -250,38 +566,94 @@ def _search(query: str) -> str:
         return _format_ddg(query, results)
 
 
-def _news(query: str) -> str:
+def _news(query: str, category: str = "auto") -> str:
     """
-    DDG first, Gemini as backup.
+    Multi-tiered Developer, Tech & GitHub news search engine.
 
-    The old version raced both backends in parallel and kept the first answer.
-    That burned one google_search grounding call on *every* news request —
-    including the startup briefing — even when DDG had already won the race.
-    Grounding has a small quota, so it ran dry after a handful of launches and
-    then 429'd for everything else (research/compare), which are the modes that
-    actually need a synthesised answer.
+    Categories:
+    - 'tech': Top Technology News (Bloomberg Tech, DTNS, TechCrunch, WIRED, Ars Technica, etc.)
+    - 'dev': Development & Architecture News (The New Stack, InfoQ, Hacker News, BleepingComputer, etc.)
+    - 'github': GitHub Updates & Open Source Releases (GitHub Changelog, GitHub Blog, releases)
+    - 'all': Combined search across all channels
 
-    DDG news returns in well under a second and gives raw headlines, which is
-    exactly what the briefing wants, so it goes first and Gemini is only touched
-    when DDG comes back empty.
+    Anti-lockout architecture:
+    - Tier 1: Targeted curated outlet search.
+    - Tier 2: Adaptive broad developer ecosystem search when querying niche tools or libraries.
+    - Tier 3: Gemini grounded technical synthesis fallback.
     """
-    gemini_query = f"latest news today: {query}" if query else "top world news today"
-    ddg_query    = query if query else "world news today"
+    clean_q = (query or "").strip()
+    cat = _detect_news_category(clean_q, category)
+
+    is_generic = not clean_q or clean_q.lower() in (
+        "top world news today", "world news today", "news", "top news",
+        "today", "latest news", "tech news", "top developer and tech news",
+        "top developer news", "developer news", "github updates", "development news"
+    )
+
+    if cat == CATEGORY_ALL:
+        site_query = (
+            f"({NEWS_CATEGORIES[CATEGORY_TECH]['site_query']}) OR "
+            f"({NEWS_CATEGORIES[CATEGORY_DEV]['site_query']}) OR "
+            f"({NEWS_CATEGORIES[CATEGORY_GITHUB]['site_query']})"
+        )
+        display_topic = clean_q or "top developer & tech intelligence"
+    else:
+        site_query = NEWS_CATEGORIES[cat]["site_query"]
+        display_topic = clean_q or NEWS_CATEGORIES[cat]["title"].lower()
+
+    if is_generic:
+        ddg_query = site_query
+    else:
+        ddg_query = f"({clean_q}) AND ({site_query})"
+
+    cat_label = NEWS_CATEGORIES.get(cat, {}).get("title", "Developer & Tech News")
+
+    gemini_query = (
+        f"You are a principal software engineer and tech analyst presenting a {cat_label} briefing. "
+        f"Retrieve current breaking news headlines for: {clean_q if not is_generic else cat_label}.\n"
+        "Coverage sources: top technology outlets, engineering publications (e.g. The New Stack, InfoQ, Hacker News, TechCrunch, WIRED), "
+        "and GitHub changelogs/releases.\n"
+        "Strict requirements:\n"
+        "- Discard non-technical tabloid/general news.\n"
+        "- Voice and style: speak as an experienced developer / tech lead partner. Highlight architectural impacts, developer tools, APIs, CVEs, or system performance.\n"
+        "- Format as a numbered list with: [Outlet Name] Title, followed by an 'Engineering Impact' analysis line and reference URL."
+    )
 
     def _ddg_attempt() -> str:
-        return _format_news(ddg_query, _ddg_news(ddg_query, max_results=8))
+        # Tier 1: Curated targeted search
+        results = _ddg_news(ddg_query, max_results=12)
+        valid = [r for r in results if _match_tech_outlet(r)]
 
-    text = _run_bounded(_ddg_attempt, timeout=5.0, label="DDG news")
-    if text and len(text) > 60 and not text.startswith("No news found"):
+        # If thin on news items and category is github, try search mode on changelog
+        if len(valid) < 3 and cat == CATEGORY_GITHUB:
+            gh_search = _ddg_search(f"{clean_q} site:github.blog changelog" if not is_generic else "site:github.blog changelog", max_results=6)
+            for m in gh_search:
+                if not any(v.get("url") == m.get("url") for v in valid):
+                    valid.append(m)
+
+        # Tier 2: Anti-lockout broad developer ecosystem search for specific/niche queries
+        if len(valid) < 2 and not is_generic:
+            broad = _ddg_news(clean_q, max_results=6)
+            if not broad:
+                broad = _ddg_search(f"{clean_q} tech update", max_results=6)
+            for b in broad:
+                if not _is_non_tech_blocked(b) and not any(v.get("url") == b.get("url") for v in valid):
+                    valid.append(b)
+
+        return _format_news(display_topic, valid, category=cat)
+
+    text = _run_bounded(_ddg_attempt, timeout=8.0, label=f"DDG {cat} news")
+    if text and len(text) > 80 and not text.startswith("No verified developer/tech news"):
         return text
 
+    # Tier 3: Gemini grounded technical synthesis
     text = _run_bounded(
-        lambda: _gemini_search(gemini_query), timeout=6.0, label="Gemini news"
+        lambda: _gemini_search(gemini_query), timeout=7.0, label=f"Gemini {cat} news"
     )
-    if text and len(text) > 60:
+    if text and len(text) > 80:
         return text
 
-    return f"No news found for: {query}"
+    return f"No verified developer/tech news found for: {clean_q or display_topic}"
 
 
 def _research(query: str) -> str:
@@ -351,11 +723,12 @@ def web_search(
     player=None,
     session_memory=None,
 ) -> str:
-    params = parameters or {}
-    query  = params.get("query", "").strip()
-    mode   = params.get("mode",  "search").lower().strip()
-    items  = params.get("items", [])
-    aspect = params.get("aspect", "general").strip() or "general"
+    params   = parameters or {}
+    query    = params.get("query", "").strip()
+    mode     = params.get("mode",  "search").lower().strip()
+    category = params.get("category", "auto").strip().lower()
+    items    = params.get("items", [])
+    aspect   = params.get("aspect", "general").strip() or "general"
 
     if not query and not items:
         return "Please provide a search query."
@@ -366,13 +739,13 @@ def web_search(
     if player:
         print(f"[WebSearch] {mode}: {query or ', '.join(items)}")  # terminal
 
-    print(f"[WebSearch] 🔍 mode={mode!r}  query={query!r}")
+    print(f"[WebSearch] 🔍 mode={mode!r}  query={query!r}  category={category!r}")
 
     try:
         if mode == "compare" and items:
             found = _compare(items, aspect)
         elif mode == "news":
-            found = _news(query)
+            found = _news(query, category=category)
         elif mode == "research":
             found = _research(query)
         elif mode == "price":
@@ -402,7 +775,7 @@ def web_search(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "web_search",
-    "description": "Searches the web. Use for ANY question about current facts, events, prices, or topics — always prefer this over guessing. Modes: 'search' (default), 'news' (latest headlines on a topic), 'research' (deep comprehensive answer), 'price' (product cost lookup), 'compare' (side-by-side comparison of items).",
+    "description": "Searches the web for facts, events, prices, and technical intelligence. Modes: 'search' (default), 'news' (developer intelligence across Tech News, Development News, and GitHub Updates with anti-lockout ecosystem fallback), 'research' (deep comprehensive answer), 'price' (product cost lookup), 'compare' (side-by-side comparison of items).",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -413,6 +786,10 @@ TOOL = {
             "mode": {
                 "type": "STRING",
                 "description": "search | news | research | price | compare"
+            },
+            "category": {
+                "type": "STRING",
+                "description": "Optional news category for mode='news': 'tech' (Tech News) | 'dev' (Development News) | 'github' (GitHub Updates) | 'all' (combined) | 'auto' (automatic detection, default)"
             },
             "items": {
                 "type": "ARRAY",

@@ -354,7 +354,12 @@ def _load_system_prompt() -> str:
         return PROMPT_PATH.read_text(encoding="utf-8")
     except Exception:
         return (
-            "You are SYNC, a Software Engineer AI Assistant built by CodeCrafters. "
+            "You are S.Y.N.C, an AI assistant built for software developers. Your specialty is "
+            "development fundamentals: writing, reading, debugging, and understanding code, and "
+            "the concepts behind it (data structures, algorithms, memory, concurrency, networking, "
+            "APIs, databases, version control, testing, security, architecture).\n\n"
+            "# Priorities (in order)\n"
+            "1. Correctness. 2. Honesty. 3. Clarity. 4. Security. 5. Brevity.\n"
             "Be concise, direct, and always use the provided tools to complete tasks. "
             "Never simulate or guess results — always call the appropriate tool."
         )
@@ -587,6 +592,27 @@ def _keep_context_of(exc: BaseException) -> bool:
             if _is_reconnect_signal(sub):
                 return _keep_context_of(sub)
     return True
+
+
+def _flatten_exc_str(exc: BaseException, seen: set | None = None) -> str:
+    """Recursively collect error messages and type names from an exception and any
+    sub-exceptions in an ExceptionGroup or BaseExceptionGroup."""
+    if seen is None:
+        seen = set()
+    if id(exc) in seen:
+        return ""
+    seen.add(id(exc))
+    parts = [f"{type(exc).__name__}: {exc}"]
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            parts.append(_flatten_exc_str(sub, seen))
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None:
+        parts.append(_flatten_exc_str(cause, seen))
+    context = getattr(exc, "__context__", None)
+    if context is not None:
+        parts.append(_flatten_exc_str(context, seen))
+    return "\n".join(p for p in parts if p)
 
 
 class SyncLive:
@@ -1044,8 +1070,8 @@ class SyncLive:
                     return
                 msg = (
                     f"{alert}\n\n"
-                    f"Inform the user about this development naturally in {lang}. "
-                    "One brief sentence only."
+                    f"Inform the user about this development naturally in {lang} as an engineering partner. "
+                    "One brief sentence focusing on developer/engineering impact only."
                 )
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": msg}]},
@@ -1417,12 +1443,16 @@ class SyncLive:
             f"{_addr}\n\n"
         )
 
+        from memory.config_manager import get_engineering_mode
+        _is_eng = get_engineering_mode()
+        _inline_decls = [d for d in TOOL_DECLARATIONS if (not _is_eng or d.get("name") in ("system_status", "undo", "screen_process", "close_camera"))]
+
         # Everything the model is told about *itself* is derived here, not
         # written into prompt.txt: the name comes from config, the platform from
         # the host, the capability list from the registries that were just
         # discovered. Rename the assistant, add a plugin or move to another OS
         # and this follows without anyone editing a prompt.
-        _all_decls = (TOOL_DECLARATIONS
+        _all_decls = (_inline_decls
                       + self._action_registry.get_tool_declarations()
                       + self._plugin_registry.get_tool_declarations())
 
@@ -1453,6 +1483,25 @@ class SyncLive:
 
         _names = {(d.get("name") if isinstance(d, dict) else getattr(d, "name", ""))
                   for d in _all_decls}
+
+        dev_level = "Infer from developer wording (beginners: step-by-step; experienced: concise & trade-offs)"
+        stack_str = "Auto-detect from project repository"
+        context_str = "None currently selected"
+        if _is_eng:
+            try:
+                from core.repository.workspace import get_workspace
+                ws_root = get_workspace().root
+                if ws_root:
+                    context_str = str(ws_root)
+                    from core.repository.search import get_repository_summary
+                    summary = get_repository_summary()
+                    langs = summary.get("language_distribution")
+                    builds = summary.get("build_configurations")
+                    if langs:
+                        stack_str = f"Languages: {langs}; Build configs: {builds or 'None'}"
+            except Exception:
+                pass
+
         sys_prompt = _render_prompt(sys_prompt, {
             "assistant_name": self._asst_name,
             "platform": f"{_platform.system()} {_platform.release()}".strip(),
@@ -1461,11 +1510,34 @@ class SyncLive:
                 has_vision="screen_process" in _names,
                 has_mic=True,
             ),
+            "developer_level": dev_level,
+            "stack": stack_str,
+            "context": context_str,
         })
 
         parts = [time_ctx, identity_ctx]
-        if mem_str:
+        if mem_str and not _is_eng:
             parts.append(mem_str)
+        if _is_eng:
+            try:
+                from core.repository.workspace import get_workspace
+                ws_root = get_workspace().root
+                if ws_root:
+                    from core.repository.search import get_repository_summary
+                    summary = get_repository_summary()
+                    repo_context = (
+                        f"\n[ACTIVE WORKSPACE REPOSITORY]\n"
+                        f"Root: {summary.get('root')}\n"
+                        f"Files: {summary.get('total_files')}, Symbols: {summary.get('total_symbols')}\n"
+                        f"Languages: {summary.get('language_distribution')}\n"
+                        f"Entry points: {', '.join(summary.get('entry_points', [])) or 'None'}\n"
+                        f"Build configs: {', '.join(summary.get('build_configurations', [])) or 'None'}\n"
+                        f"Git: {summary.get('git', {}).get('branch', 'Not a git repo')}\n"
+                        f"Operating rules: You are in software engineering mode. You must only read and edit files inside this repository.\n"
+                    )
+                    parts.append(repo_context)
+            except Exception:
+                pass
         parts.append(sys_prompt)
 
         cfg = dict(
@@ -1580,6 +1652,15 @@ class SyncLive:
         _t_tool = time.monotonic()
         self.ui.set_state("THINKING")
 
+
+        from memory.config_manager import get_engineering_mode
+        if get_engineering_mode() and name in ("save_memory", "manage_monitor", "routines", "weather_report"):
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+            return types.FunctionResponse(
+                id=fc.id, name=name,
+                response={"result": f"Action '{name}' is disabled in engineering mode."}
+            )
 
         if name == "save_memory":
             category = args.get("category", "notes")
@@ -1717,16 +1798,28 @@ class SyncLive:
                 # who loads a folder and asks for something means "in this
                 # folder", so every coding request goes there; clearing the
                 # upload box (✕) is how to ask for a separate new project.
-                if (name == "dev_agent" and not args.get("folder")
-                        and self.ui.current_file
-                        and Path(self.ui.current_file).is_dir()
-                        and str(args.get("mode") or "").lower() != "status"):
-                    args["folder"] = self.ui.current_file
-                    args["mode"] = "improve"
+                if name == "dev_agent" and not args.get("folder"):
+                    from memory.config_manager import get_active_repository
+                    active_r = get_active_repository()
+                    if active_r and Path(active_r).is_dir():
+                        args["folder"] = active_r
+                    elif (self.ui.current_file
+                            and Path(self.ui.current_file).is_dir()
+                            and str(args.get("mode") or "").lower() != "status"):
+                        args["folder"] = self.ui.current_file
+                        args["mode"] = "improve"
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
                 r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
                 result = r or "Done."
+                # Mirror real-time code audit updates to the UI content panel
+                if name in ("apply_patch", "create_file", "dev_agent") and r and not str(r).startswith(("Error", "Patch preview error")):
+                    try:
+                        from core.repository.audit import get_audit_logger
+                        audit_text = get_audit_logger().format_ui_audit_text(limit=10)
+                        self.ui.show_content("REAL-TIME CODE AUDIT", audit_text)
+                    except Exception:
+                        pass
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
                         and not r.startswith("No results")
@@ -1776,19 +1869,36 @@ class SyncLive:
         )
 
     async def _send_realtime(self):
+        # Gemini Live closes the connection if no client data is received for ~60-120s.
+        # Send a tiny silence heartbeat (50ms of 16kHz 16-bit mono PCM = 1600 zero-bytes)
+        # every 15s if out_queue is idle, so coding, thinking, or sleeping wake-word
+        # does not cause a client inactivity disconnect (1008).
+        _SILENCE_FRAME = b"\x00" * 1600
         while True:
-            msg = await self.out_queue.get()
-            # Gemini 3.x Live rejects the old realtime_input.media_chunks field
-            # (what `media=...` maps to) and closes the socket with a 1007. Send
-            # mic / phone PCM through the new `audio` field instead. Queue items
-            # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
-            # the phone relay.
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
+            try:
+                msg = await asyncio.wait_for(self.out_queue.get(), timeout=15.0)
+                # Gemini 3.x Live rejects the old realtime_input.media_chunks field
+                # (what `media=...` maps to) and closes the socket with a 1007. Send
+                # mic / phone PCM through the new `audio` field instead. Queue items
+                # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
+                # the phone relay.
+                await self.session.send_realtime_input(
+                    audio=types.Blob(
+                        data=msg["data"],
+                        mime_type=msg.get("mime_type", "audio/pcm"),
+                    )
                 )
-            )
+            except asyncio.TimeoutError:
+                if self.session is not None:
+                    try:
+                        await self.session.send_realtime_input(
+                            audio=types.Blob(
+                                data=_SILENCE_FRAME,
+                                mime_type="audio/pcm",
+                            )
+                        )
+                    except Exception:
+                        pass
         
 
     async def _listen_audio(self):
@@ -1994,7 +2104,10 @@ class SyncLive:
                             _audio_data = response.data
                             _SLICE = 2400
                             for _i in range(0, len(_audio_data), _SLICE):
-                                self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                                try:
+                                    self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                                except asyncio.QueueFull:
+                                    pass
 
                     if response.server_content:
                         sc = response.server_content
@@ -2087,8 +2200,12 @@ class SyncLive:
                         )
                         await self._flush_pending_vision()
         except Exception as e:
-            print(f"[SYNC] ❌ Recv: {e}")
-            traceback.print_exc()
+            err_msg = str(e)
+            if "client inactivity" in err_msg.lower() or "1008" in err_msg:
+                print(f"[SYNC] ℹ️ Recv closed due to inactivity: {e}")
+            else:
+                print(f"[SYNC] ❌ Recv: {e}")
+                traceback.print_exc()
             raise
 
     async def _play_audio(self):
@@ -2253,12 +2370,13 @@ class SyncLive:
         # the briefing as it always was.
         options   = options or {}
         want_news = options.get("news", True) is not False
-        topic     = str(options.get("news_topic") or "").strip() or "top world news today"
+        topic     = str(options.get("news_topic") or "").strip() or "top developer and tech news"
+        category  = str(options.get("news_category") or "auto").strip()
         extra     = str(options.get("extra") or "").strip()
 
         # Start fetching news immediately — runs in parallel while phase 1 plays
         loop = asyncio.get_event_loop()
-        news_future = (loop.run_in_executor(None, _fetch_news_sync, topic)
+        news_future = (loop.run_in_executor(None, _fetch_news_sync, topic, category)
                        if want_news else None)
 
         await asyncio.sleep(0.3)
@@ -2356,21 +2474,21 @@ class SyncLive:
                           f"{extra} — do it now, using tools if it needs them.{lang_str}")
                 elif not failed:
                     # Show on UI content panel immediately
-                    default_topic = topic == "top world news today"
-                    self.ui.show_content("NEWS — top world news today" if default_topic else "NEWS",
+                    default_topic = topic in ("top world news today", "top developer and tech news", "tech news")
+                    self.ui.show_content("DEVELOPER NEWS — Tech Radar" if default_topic else f"DEVELOPER NEWS — {topic}",
                                          news_text)
 
                     p2 = (
-                        f"[BRIEFING] Here are today's news headlines ({topic}):\n{news_text}\n\n"
-                        "Pick ONE headline, summarise it in one sentence, then say the full list "
-                        f"is displayed on screen.{no_tools}{extra_clause}{lang_str}"
+                        f"[BRIEFING] Here is today's developer and tech news radar from Bloomberg Tech, DTNS, TechNewsWorld, TechCrunch, CNET, and WIRED ({topic}):\n{news_text}\n\n"
+                        "Act as a senior software engineer / technical lead partner. Pick ONE headline with high engineering or technical impact, deliver a crisp 1-sentence technical synthesis explaining its significance (focusing on system architecture, developer tooling, security, or infrastructure), then state that the full developer news radar is displayed on screen."
+                        f"{no_tools}{extra_clause}{lang_str}"
                     )
                 else:
                     self.ui.write_log(
-                        f"SYS: News unavailable — backend returned: {news_text[:120]!r}"
+                        f"SYS: Tech news unavailable — backend returned: {news_text[:120]!r}"
                     )
                     p2 = (
-                        "News headlines could not be fetched right now. "
+                        "Developer news headlines could not be fetched from the approved tech outlets right now. "
                         f"Let the user know briefly.{extra_clause}{lang_str}"
                     )
 
@@ -2378,7 +2496,7 @@ class SyncLive:
                     turns={"role": "user", "parts": [{"text": p2}]},
                     turn_complete=True,
                 )
-                self.ui.write_log("[SYNC] Briefing phase 2 (news) sent.")
+                self.ui.write_log("[SYNC] Briefing phase 2 (developer news) sent.")
             except Exception as e:
                 print(f"[Briefing] Phase 2 error: {e}")
                 print(f"[SYNC] Briefing phase 2 failed: {e}")
@@ -2792,7 +2910,7 @@ class SyncLive:
                     session.send_client_content = _send_and_arm
 
                     self.session          = session
-                    self.audio_in_queue   = asyncio.Queue()
+                    self.audio_in_queue   = asyncio.Queue(maxsize=300)
                     self.out_queue        = asyncio.Queue(maxsize=200)
                     self._turn_done_event = asyncio.Event()
                     self._rx_deadline     = None
@@ -2920,6 +3038,8 @@ class SyncLive:
                     self._conn_backoff = 0
                     continue
 
+                err_str = _flatten_exc_str(e)
+
                 # A resumption handle the server will not accept — expired, or
                 # belonging to a session it has since dropped. Without this, the
                 # same dead handle would be replayed on every retry and the
@@ -2927,10 +3047,10 @@ class SyncLive:
                 # survive a reconnect would be the thing preventing one. Drop it
                 # once and let the next attempt start clean.
                 if _resumed_with and (
-                    "resum" in str(e).lower()
-                    or "handle" in str(e).lower()
-                    or "INVALID_ARGUMENT" in str(e)
-                    or "NOT_FOUND" in str(e)
+                    "resum" in err_str.lower()
+                    or "handle" in err_str.lower()
+                    or "INVALID_ARGUMENT" in err_str
+                    or "NOT_FOUND" in err_str
                 ):
                     self.ui.write_log("[SYNC] 🔗 Resumption handle rejected — starting a fresh session")
                     self.ui.write_log("SYS: Could not restore the conversation — starting fresh.")
@@ -2938,7 +3058,20 @@ class SyncLive:
                     self._conn_backoff = 0
                     continue
 
-                err_str = str(e)
+                # Inactivity disconnect (code 1008 / "Session closed due to client inactivity")
+                # When developer is reading, thinking, or working silently, Gemini Live may close
+                # the connection. Preserve the resumption handle so the conversation context
+                # is kept, and reconnect seamlessly without backoff delay or scary error logs.
+                is_inactivity = (
+                    "client inactivity" in err_str.lower()
+                    or ("1008" in err_str and "policy violation" in err_str.lower())
+                    or ("1008" in err_str and "inactivity" in err_str.lower())
+                )
+                if is_inactivity:
+                    self.ui.write_log("[SYNC] 🔄 Resuming session after silence...")
+                    self._conn_backoff = 0
+                    continue
+
                 self.ui.write_log(f"[SYNC] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
 
@@ -3025,6 +3158,7 @@ class SyncLive:
 
             if self._dashboard:
                 await self._dashboard.broadcast({"type": "status", "state": "sleeping"})
+            delay = getattr(self, "_conn_backoff", 3)
             self.ui.write_log(f"[SYNC] Reconnecting in {delay}s...")
             await asyncio.sleep(delay)
 

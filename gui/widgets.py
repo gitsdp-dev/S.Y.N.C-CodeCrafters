@@ -72,14 +72,22 @@ class MetricBar(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
 
-        p.setBrush(QBrush(qcol(C.PANEL2)))
-        p.setPen(QPen(qcol(C.BORDER_A), 1))
-        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 4, 4)
+        # Glassmorphic capsule
+        g = QLinearGradient(0, 0, 0, H)
+        g.setColorAt(0.0, QColor(24, 34, 50, 190))
+        g.setColorAt(1.0, QColor(11, 17, 26, 215))
+        p.setBrush(QBrush(g))
+        p.setPen(QPen(qcol(C.BORDER_A), 1.5))
+        p.drawRoundedRect(QRectF(0.75, 0.75, W - 1.5, H - 1.5), 6, 6)
+
+        # Specular glint
+        p.setPen(QPen(QColor(255, 255, 255, 45), 1.0))
+        p.drawLine(QLineF(6, 1.5, W - 6, 1.5))
 
         bar_h   = 4
-        bar_y   = H - bar_h - 5
-        bar_w   = W - 12
-        bar_x   = 6
+        bar_y   = H - bar_h - 6
+        bar_w   = W - 16
+        bar_x   = 8
         fill_w  = int(bar_w * self._value / 100)
 
         p.setBrush(QBrush(qcol(C.BAR_BG)))
@@ -97,13 +105,13 @@ class MetricBar(QWidget):
             p.setBrush(QBrush(bar_col))
             p.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 2, 2)
 
-        p.setFont(hud_font(7, QFont.Weight.Bold))
-        p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(8, 5, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
+        p.setFont(px_font(9, QFont.Weight.Bold, spacing=0.8))
+        p.setPen(QPen(qcol(C.TEXT_MED), 1))
+        p.drawText(QRectF(8, 5, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label.upper())
 
-        p.setFont(hud_font(9, QFont.Weight.Bold))
+        p.setFont(px_font(11, QFont.Weight.Bold, mono=True))
         p.setPen(QPen(bar_col if self._text != "--" else qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(0, 4, W - 6, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
+        p.drawText(QRectF(0, 4, W - 8, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
 
         p.end()
 
@@ -411,19 +419,27 @@ class _DropCanvas(QWidget):
         z = self._z
         W, H = self.width(), self.height()
 
+        g = QLinearGradient(0, 0, 0, H)
         if z._current_file:
-            edge, fill = qcol(C.GREEN), blend(C.GREEN, 0.07)
+            edge, g0, g1 = qcol(C.GREEN), with_alpha(C.GREEN, 0.22), with_alpha(C.PANEL, 0.85)
         elif z._drag_over:
-            edge, fill = qcol(C.PRI), blend(C.PRI, 0.14)
+            edge, g0, g1 = qcol(C.PRI), with_alpha(C.PRI, 0.28), with_alpha(C.PANEL, 0.85)
         elif z._hovering:
-            edge, fill = blend(C.PRI, 0.75), blend(C.PRI, 0.08)
+            edge, g0, g1 = qcol(C.PRI), with_alpha(C.PRI, 0.14), with_alpha(C.PANEL2, 0.85)
         else:
-            edge, fill = blend(C.PRI, 0.38), blend(C.PRI, 0.04)
-        p.setBrush(QBrush(fill))
-        pen = QPen(edge, 1, Qt.PenStyle.SolidLine if z._current_file else Qt.PenStyle.DashLine)
+            edge, g0, g1 = qcol(C.BORDER_A), QColor(22, 30, 46, 185), QColor(11, 16, 26, 210)
+
+        g.setColorAt(0.0, g0)
+        g.setColorAt(1.0, g1)
+        p.setBrush(QBrush(g))
+        pen = QPen(edge, 1.5, Qt.PenStyle.SolidLine if (z._current_file or z._hovering) else Qt.PenStyle.DashLine)
         pen.setDashOffset(z._dash_offset)
         p.setPen(pen)
-        p.drawPolygon(chamfer(QRectF(0.5, 0.5, W - 1, H - 1), 7))
+        p.drawRoundedRect(QRectF(0.75, 0.75, W - 1.5, H - 1.5), 6, 6)
+
+        # Specular glint
+        p.setPen(QPen(QColor(255, 255, 255, 50), 1.0))
+        p.drawLine(QLineF(8, 1.5, W - 8, 1.5))
 
         if z._current_file:
             self._paint_file(p, W, H)
@@ -435,13 +451,13 @@ class _DropCanvas(QWidget):
 
     def _paint_idle(self, p, W, H, hover):
         cy = H / 2
-        p.setPen(QPen(qcol(C.PRI) if hover else blend(C.PRI, 0.8), 1.6))
+        p.setPen(QPen(qcol(C.PRI) if hover else qcol(C.TEXT_MED), 1.8))
         p.drawLine(QLineF(14, cy, 26, cy))
         p.drawLine(QLineF(20, cy - 6, 20, cy + 6))
-        p.setFont(px_font(11, QFont.Weight.DemiBold, spacing=1.4))
-        p.setPen(QPen(qcol(C.TEXT) if hover else qcol(C.TEXT_MED)))
+        p.setFont(px_font(10, QFont.Weight.Bold, spacing=0.8))
+        p.setPen(QPen(qcol(C.WHITE) if hover else qcol(C.TEXT_MED)))
         p.drawText(QRectF(36, 0, W - 44, H), Qt.AlignmentFlag.AlignVCenter,
-                   p.fontMetrics().elidedText("DROP A FILE OR FOLDER  ·  OR CLICK",
+                   p.fontMetrics().elidedText("DROP FILE OR FOLDER [CLICK TO BROWSE]",
                                               Qt.TextElideMode.ElideRight, int(W - 44)))
 
     def _paint_drag_over(self, p, W, H):
@@ -621,43 +637,61 @@ class HoloPanel(QWidget):
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
-        cut = 11
-        g = QLinearGradient(0, 0, 0, H)
-        g.setColorAt(0.0, blend(C.PRI, 0.085))
-        g.setColorAt(0.18, blend(C.PRI, 0.045))
-        g.setColorAt(1.0, blend(C.PRI, 0.025))
-        p.setBrush(QBrush(g))
-        p.setPen(QPen(blend(C.PRI, 0.24), 1))
-        p.drawPolygon(chamfer(QRectF(0.5, 0.5, W - 1, H - 1), cut))
-        # lit edges: the two chamfers and a short run along from each
-        p.setPen(QPen(blend(C.PRI, 0.85), 1.6))
-        p.drawLine(QLineF(0.5, cut + 0.5, cut + 0.5, 0.5))
-        p.drawLine(QLineF(cut + 0.5, 0.5, cut + 44, 0.5))
-        p.drawLine(QLineF(W - 0.5, H - cut - 0.5, W - cut - 0.5, H - 0.5))
-        p.drawLine(QLineF(W - cut - 0.5, H - 0.5, W - cut - 34, H - 0.5))
+
+        # Glassmorphic smoked glass card with subtle depth refraction
+        card_r = QRectF(0.75, 0.75, W - 1.5, H - 1.5)
+        glass_grad = QLinearGradient(0, 0, 0, H)
+        glass_grad.setColorAt(0.0, QColor(24, 34, 52, 215))
+        glass_grad.setColorAt(0.35, QColor(14, 21, 33, 195))
+        glass_grad.setColorAt(1.0, QColor(9, 13, 21, 225))
+        p.setBrush(QBrush(glass_grad))
+        p.setPen(QPen(qcol(C.BORDER_A), 1.5))
+        p.drawRoundedRect(card_r, 8, 8)
+
+        # Specular light refraction rim on top edge
+        spec = QLinearGradient(12, 1.5, W - 12, 1.5)
+        spec.setColorAt(0.0, QColor(255, 255, 255, 0))
+        spec.setColorAt(0.2, QColor(255, 255, 255, 110))
+        spec.setColorAt(0.5, with_alpha(C.PRI, 0.60))
+        spec.setColorAt(0.8, QColor(255, 255, 255, 110))
+        spec.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setPen(QPen(QBrush(spec), 1.2))
+        p.drawLine(QLineF(12, 1.5, W - 12, 1.5))
+
         if self._title:
+            # Frosted glass header band — fast direct fill without expensive clipping path
+            hdr_rect = QRectF(1, 1, W - 2, self.HEADER - 1)
+            p.fillRect(hdr_rect, QColor(24, 34, 52, 175))
+
+            # Neobrutalist bold neon accent tag on the left
+            p.setBrush(QBrush(qcol(C.PRI)))
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(qcol(C.ACC)))
-            p.drawRect(QRectF(12, 11, 3, 10))
+            p.drawRoundedRect(QRectF(12, 7, 5, 16), 2, 2)
+            p.setBrush(QBrush(QColor("#ffffff")))
+            p.drawRect(QRectF(13.5, 9, 2, 3))
+
             right = self._header_right()
             code_w = 0.0
             if self._code:
-                p.setFont(px_font(10, mono=True))
-                code_w = p.fontMetrics().horizontalAdvance(self._code) + 8
-                p.setPen(QPen(blend(C.PRI, 0.5)))
-                p.drawText(QRectF(right - code_w, 6, code_w, 20),
-                           Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self._code)
-            p.setFont(px_font(11, QFont.Weight.DemiBold, spacing=1.8))
-            p.setPen(QPen(qcol(C.PRI)))
-            room = max(10.0, right - code_w - 26)
-            p.drawText(QRectF(21, 6, room, 20), Qt.AlignmentFlag.AlignVCenter,
+                p.setFont(px_font(9.5, QFont.Weight.Bold, mono=True))
+                code_w = p.fontMetrics().horizontalAdvance(self._code) + 14
+                pill_rect = QRectF(right - code_w, 6, code_w, 18)
+                p.setBrush(QBrush(QColor(10, 16, 26, 220)))
+                p.setPen(QPen(qcol(C.PRI), 1.2))
+                p.drawRoundedRect(pill_rect, 4, 4)
+                p.setPen(QPen(qcol(C.PRI)))
+                p.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, self._code)
+                code_w += 6
+
+            p.setFont(px_font(10.5, QFont.Weight.Bold, spacing=1.2))
+            p.setPen(QPen(qcol(C.WHITE)))
+            room = max(10.0, right - code_w - 28)
+            p.drawText(QRectF(23, 6, room, 20), Qt.AlignmentFlag.AlignVCenter,
                        p.fontMetrics().elidedText(self._title, Qt.TextElideMode.ElideRight, int(room)))
-            lg = QLinearGradient(12, 0, W - 12, 0)
-            lg.setColorAt(0.0, with_alpha(C.PRI, 0.55))
-            lg.setColorAt(0.6, with_alpha(C.PRI, 0.12))
-            lg.setColorAt(1.0, with_alpha(C.PRI, 0.0))
-            p.setPen(QPen(QBrush(lg), 1))
-            p.drawLine(QLineF(12, self.HEADER, W - 12, self.HEADER))
+
+            # Lit glass divider under header
+            p.setPen(QPen(qcol(C.BORDER_A), 1.2))
+            p.drawLine(QLineF(1, self.HEADER, W - 1, self.HEADER))
         p.end()
 
 
@@ -682,8 +716,7 @@ class PanelText:
 
 
 class RingGauge(QWidget):
-    """A 270° dial: graduations, a track, the value arc with a soft glow, the
-    figure in the middle and the label in the gauge's open mouth."""
+    """Instrumentation dial with frosted glass lens and neobrutalist neon arc."""
 
     def __init__(self, label: str, parent=None):
         super().__init__(parent)
@@ -704,55 +737,45 @@ class RingGauge(QWidget):
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
-        r = min(W - 4, H - 4) / 2
+        r = min(W - 8, H - 8) / 2
         cx, cy = W / 2, H / 2
         na = self._text in ("N/A", "--")
-        col = (blend(C.PRI, 0.5) if na else qcol(C.RED) if self._v > 85
+        col = (qcol(C.TEXT_DIM) if na else qcol(C.RED) if self._v > 85
                else qcol(C.ACC) if self._v > 65 else qcol(C.PRI))
-        maj, mnr = [], []
-        for i in range(37):
-            a = math.radians(225 - i * 7.5)
-            ca, sa = math.cos(a), -math.sin(a)
-            if i % 6 == 0:
-                maj.append(QLineF(cx + ca * r * 0.80, cy + sa * r * 0.80, cx + ca * r * 0.98, cy + sa * r * 0.98))
-            else:
-                mnr.append(QLineF(cx + ca * r * 0.90, cy + sa * r * 0.90, cx + ca * r * 0.98, cy + sa * r * 0.98))
-        p.setPen(QPen(blend(C.PRI, 0.40), 1.2))
-        p.drawLines(maj)
-        p.setPen(QPen(blend(C.PRI, 0.16), 1))
-        p.drawLines(mnr)
-        ar = r * 0.70
+
+        # Frosted glass dial backing lens (fast solid fill, zero radial gradient overhead)
+        ar = r * 0.76
+        lens = QRectF(cx - ar - 5, cy - ar - 5, (ar + 5) * 2, (ar + 5) * 2)
+        p.setBrush(QBrush(QColor(16, 22, 34, 180)))
+        p.setPen(QPen(qcol(C.BORDER_A), 1))
+        p.drawEllipse(lens)
+
+        # Neobrutalist track: 260 degree arc with sharp flat terminals
         box = QRectF(cx - ar, cy - ar, ar * 2, ar * 2)
-        track = QPen(blend(C.PRI, 0.13), 5)
-        track.setCapStyle(Qt.PenCapStyle.FlatCap)
+        track = QPen(qcol(C.BAR_BG), 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap)
         p.setPen(track)
-        p.drawArc(box, 225 * 16, -270 * 16)
-        span = int(-270 * 16 * self._v / 100)
-        if span:
-            glow = QPen(with_alpha(col, 0.22), 11)
-            glow.setCapStyle(Qt.PenCapStyle.FlatCap)
-            p.setPen(glow)
-            p.drawArc(box, 225 * 16, span)
-            arc = QPen(col, 5)
-            arc.setCapStyle(Qt.PenCapStyle.FlatCap)
+        p.drawArc(box, int(220 * 16), int(-260 * 16))
+
+        span = int(-260 * 16 * self._v / 100)
+        if span and not na:
+            arc = QPen(col, 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap)
             p.setPen(arc)
-            p.drawArc(box, 225 * 16, span)
-        p.setPen(QPen(blend(C.PRI, 0.25), 1))
-        ir = r * 0.52
-        p.drawEllipse(QRectF(cx - ir, cy - ir, ir * 2, ir * 2))
-        p.setFont(px_font(max(10, r * 0.30), QFont.Weight.DemiBold, mono=True))
+            p.drawArc(box, int(220 * 16), span)
+
+        # Bold centered value
+        p.setFont(px_font(max(11, r * 0.35), QFont.Weight.Bold, mono=True))
         p.setPen(QPen(qcol(C.TEXT_DIM) if na else qcol(C.WHITE)))
-        p.drawText(QRectF(cx - r, cy - r * 0.24, r * 2, r * 0.46), Qt.AlignmentFlag.AlignCenter, self._text)
-        p.setFont(px_font(max(8, r * 0.16), QFont.Weight.DemiBold, spacing=1.4))
-        p.setPen(QPen(blend(col, 0.9)))
-        p.drawText(QRectF(cx - r, cy + r * 0.66, r * 2, r * 0.3), Qt.AlignmentFlag.AlignCenter, self._label)
+        p.drawText(QRectF(cx - r, cy - r * 0.28, r * 2, r * 0.5), Qt.AlignmentFlag.AlignCenter, self._text)
+
+        # Bold neobrutalist uppercase label below
+        p.setFont(px_font(max(8.5, r * 0.18), QFont.Weight.Bold, spacing=1.0))
+        p.setPen(QPen(qcol(C.TEXT_MED)))
+        p.drawText(QRectF(cx - r, cy + r * 0.55, r * 2, r * 0.35), Qt.AlignmentFlag.AlignCenter, self._label)
         p.end()
 
 
 class Sparkline(QWidget):
-    """A scrolling line graph over a faint grid. The scale follows the largest
-    recent value but never drops below `floor`, so an idle line stays low
-    instead of magnifying noise to full height."""
+    """Frosted glass telemetry chart with neobrutalist neon curve."""
 
     def __init__(self, samples: int = 60, floor: float = 0.25, parent=None):
         super().__init__(parent)
@@ -770,11 +793,19 @@ class Sparkline(QWidget):
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
-        p.setPen(QPen(blend(C.PRI, 0.10), 1))
-        for i in range(1, 4):
-            p.drawLine(QLineF(0, H * i / 4, W, H * i / 4))
-        for i in range(1, 8):
-            p.drawLine(QLineF(W * i / 8, 0, W * i / 8, H))
+
+        # Frosted glass telemetry container
+        g = QLinearGradient(0, 0, 0, H)
+        g.setColorAt(0.0, QColor(22, 32, 48, 180))
+        g.setColorAt(1.0, QColor(12, 17, 26, 205))
+        p.setBrush(QBrush(g))
+        p.setPen(QPen(qcol(C.BORDER), 1.5))
+        p.drawRoundedRect(QRectF(0.75, 0.75, W - 1.5, H - 1.5), 6, 6)
+
+        # Top specular sheen
+        p.setPen(QPen(QColor(255, 255, 255, 45), 1.0))
+        p.drawLine(QLineF(6, 1.5, W - 6, 1.5))
+
         vals = list(self._vals)
         if len(vals) < 2:
             p.end()
@@ -782,7 +813,7 @@ class Sparkline(QWidget):
         top = max(self._floor, max(vals)) * 1.15
         n = self._vals.maxlen or len(vals)
         x0 = W * (n - len(vals)) / max(1, n - 1)
-        pts = [QPointF(x0 + W * i / max(1, n - 1), H - 3 - (H - 8) * (v / top)) for i, v in enumerate(vals)]
+        pts = [QPointF(x0 + W * i / max(1, n - 1), H - 4 - (H - 10) * (v / top)) for i, v in enumerate(vals)]
         path = QPainterPath(pts[0])
         for pt in pts[1:]:
             path.lineTo(pt)
@@ -790,25 +821,29 @@ class Sparkline(QWidget):
         area.lineTo(pts[-1].x(), H)
         area.lineTo(pts[0].x(), H)
         area.closeSubpath()
-        g = QLinearGradient(0, 0, 0, H)
-        g.setColorAt(0, with_alpha(C.PRI, 0.35))
-        g.setColorAt(1, with_alpha(C.PRI, 0.0))
-        p.fillPath(area, QBrush(g))
-        p.setPen(QPen(qcol(C.PRI), 1.5))
+
+        # Neobrutalist high-voltage neon fill
+        ag = QLinearGradient(0, 0, 0, H)
+        ag.setColorAt(0, with_alpha(C.PRI, 0.35))
+        ag.setColorAt(1, with_alpha(C.PRI, 0.0))
+        p.fillPath(area, QBrush(ag))
+        p.setPen(QPen(qcol(C.PRI), 1.8))
         p.drawPath(path)
+
+        # Terminal neon pip
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(qcol(C.WHITE)))
-        p.drawEllipse(pts[-1], 2.5, 2.5)
+        p.drawRect(QRectF(pts[-1].x() - 2, pts[-1].y() - 2, 4, 4))
         p.end()
 
 
 class DataRow(QWidget):
-    """KEY ........ value — one fact per row."""
+    """KEY ........ value — technical fact row with bold contrast."""
 
     def __init__(self, key: str, value: str = "--", colour: str | None = None, parent=None):
         super().__init__(parent)
         self._key, self._value, self._colour = key, value, colour
-        self.setFixedHeight(20)
+        self.setFixedHeight(22)
 
     def set_value(self, value: str, colour: str | None = None) -> None:
         if value == self._value and colour == self._colour:
@@ -820,20 +855,21 @@ class DataRow(QWidget):
         p = QPainter(self)
         if not p.isActive():
             return
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
-        p.setFont(px_font(10, QFont.Weight.DemiBold, spacing=1.2))
-        p.setPen(QPen(qcol(C.TEXT_DIM)))
+        p.setFont(px_font(10, QFont.Weight.Bold, spacing=0.8))
+        p.setPen(QPen(qcol(C.TEXT_MED)))
         kw = p.fontMetrics().horizontalAdvance(self._key) + 6
         p.drawText(QRectF(0, 0, W, H), Qt.AlignmentFlag.AlignVCenter, self._key)
-        p.setFont(px_font(11, QFont.Weight.Medium, mono=True))
+        p.setFont(px_font(11, QFont.Weight.Bold, mono=True))
         room = max(10, int(W - kw - 12))
         value = p.fontMetrics().elidedText(self._value, Qt.TextElideMode.ElideRight, room)
         vw = p.fontMetrics().horizontalAdvance(value) + 6
-        p.setPen(QPen(qcol(_pal(self._colour) or C.TEXT)))
+        p.setPen(QPen(qcol(_pal(self._colour) or C.WHITE)))
         p.drawText(QRectF(0, 0, W, H), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, value)
-        p.setPen(QPen(blend(C.PRI, 0.22), 1, Qt.PenStyle.DotLine))
+        p.setPen(QPen(qcol(C.BORDER_A), 1, Qt.PenStyle.DotLine))
         if W - vw > kw:
-            p.drawLine(QLineF(kw, H / 2 + 3, W - vw, H / 2 + 3))
+            p.drawLine(QLineF(kw, H / 2 + 1, W - vw, H / 2 + 1))
         p.end()
 
 
@@ -948,56 +984,93 @@ class IconButton(QPushButton):
         if not self.isEnabled():
             col = qcol(C.TEXT_DIM)
         hot = self.underMouse() or self.isChecked() or self.isDown()
-        p.setBrush(QBrush(blend(col, 0.20 if self.isDown() else 0.15 if hot else 0.06)))
-        p.setPen(QPen(blend(col, 0.8 if hot else 0.42), 1))
-        p.drawPolygon(chamfer(QRectF(0.5, 0.5, W - 1, H - 1), 6))
-        if self._compact:
-            paint_icon(p, self._kind, QRectF(W * 0.26, H * 0.26, W * 0.48, H * 0.48), col)
+
+        # Neobrutalist tactile button: physical press offset & hard drop shadow
+        ox = 2.0 if self.isDown() else 0.0
+        oy = 2.0 if self.isDown() else 0.0
+
+        if not self.isDown():
+            # Hard offset drop shadow (zero blur, fast on integrated graphics)
+            p.fillRect(QRectF(2, 2, W - 2, H - 2), QColor(0, 0, 0, 190))
+
+        # Face of the button
+        face_r = QRectF(ox, oy, W - 2, H - 2)
+        if self.isChecked() or self.isDown():
+            bg_col = blend(col, 0.28, C.PANEL2)
+        elif hot:
+            bg_col = blend(col, 0.18, C.PANEL)
         else:
-            paint_icon(p, self._kind, QRectF(11, (H - 15) / 2, 15, 15), col)
-            p.setFont(px_font(11, QFont.Weight.DemiBold, spacing=1.6))
-            p.setPen(QPen(col))
-            room = max(10, W - 44)
-            p.drawText(QRectF(34, 0, room, H), Qt.AlignmentFlag.AlignVCenter,
-                       p.fontMetrics().elidedText(self._label, Qt.TextElideMode.ElideRight, room))
+            bg_col = QColor(14, 20, 30, 235)
+
+        p.setBrush(QBrush(bg_col))
+        p.setPen(QPen(col if hot else qcol(C.BORDER_A), 2.0))
+        p.drawRoundedRect(face_r, 2, 2)
+
+        if self._compact:
+            paint_icon(p, self._kind, QRectF(ox + (W - 2) * 0.24, oy + (H - 2) * 0.24,
+                                            (W - 2) * 0.52, (H - 2) * 0.52), col)
+        else:
+            paint_icon(p, self._kind, QRectF(ox + 8, oy + (H - 2 - 14) / 2, 14, 14), col)
+            f_sz = 9.5 if W < 105 else 10.5
+            p.setFont(px_font(f_sz, QFont.Weight.Bold, spacing=0.8))
+            p.setPen(QPen(qcol(C.WHITE) if hot else qcol(C.TEXT)))
+            room = max(10, int(W - 32))
+            p.drawText(QRectF(ox + 26, oy, room, H - 2), Qt.AlignmentFlag.AlignVCenter,
+                       p.fontMetrics().elidedText(self._label.upper(), Qt.TextElideMode.ElideRight, room))
         p.end()
 
 
 class ArcLogo(QWidget):
-    """The small arc-reactor mark at the left of the header."""
+    """Glassmorphic badge with neobrutalist geometric SYNC mark."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(34, 34)
+        self.setFixedSize(32, 32)
 
     def paintEvent(self, _):
         p = QPainter(self)
         if not p.isActive():
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        cx = cy = 17
-        g = QRadialGradient(cx, cy, 16)
-        g.setColorAt(0, with_alpha(C.PRI, 0.55))
-        g.setColorAt(1, with_alpha(C.PRI, 0.0))
-        p.setPen(Qt.PenStyle.NoPen)
+        cx, cy = 16.0, 16.0
+
+        # Frosted glass squircle
+        g = QLinearGradient(0, 0, 0, 32)
+        g.setColorAt(0.0, QColor(28, 40, 60, 210))
+        g.setColorAt(1.0, QColor(12, 18, 28, 225))
         p.setBrush(QBrush(g))
-        p.drawEllipse(QPointF(cx, cy), 16, 16)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(qcol(C.PRI), 1.6))
-        p.drawEllipse(QPointF(cx, cy), 13, 13)
-        p.setPen(QPen(blend(C.PRI, 0.7), 2.2))
-        for i in range(10):
-            a = math.radians(i * 36 + 90)
-            p.drawLine(QLineF(cx + math.cos(a) * 7.5, cy + math.sin(a) * 7.5,
-                              cx + math.cos(a) * 10.5, cy + math.sin(a) * 10.5))
+        p.setPen(QPen(qcol(C.BORDER_B), 1.5))
+        p.drawRoundedRect(QRectF(2.5, 2.5, 27, 27), 6, 6)
+
+        # Specular glint
+        p.setPen(QPen(QColor(255, 255, 255, 80), 1.0))
+        p.drawLine(QLineF(6, 3.5, 26, 3.5))
+
+        # Precision reticle ticks
+        p.setPen(QPen(qcol(C.BORDER_A), 1.0))
+        p.drawLine(QLineF(16, 2.5, 16, 6.0))
+        p.drawLine(QLineF(16, 26.0, 16, 29.5))
+        p.drawLine(QLineF(2.5, 16, 6.0, 16))
+        p.drawLine(QLineF(26.0, 16, 29.5, 16))
+
+        # Opposing neobrutalist neon brackets
+        p.setPen(QPen(qcol(C.PRI), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap))
+        # Top-right bracket
+        p.drawLine(QLineF(19, 9, 23, 9))
+        p.drawLine(QLineF(23, 9, 23, 13))
+        # Bottom-left bracket
+        p.drawLine(QLineF(13, 23, 9, 23))
+        p.drawLine(QLineF(9, 23, 9, 19))
+
+        # Precision central sync core
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(qcol(C.WHITE)))
-        p.setPen(QPen(qcol(C.PRI), 1))
-        p.drawEllipse(QPointF(cx, cy), 4, 4)
+        p.drawRect(QRectF(14, 14, 4, 4))
         p.end()
 
 
 class StateChip(QWidget):
-    """What the assistant is doing, in the middle of the header."""
+    """What the assistant is doing, presented as a crisp Neobrutalist status badge."""
 
     _COLOURS = {"LISTENING": "GREEN", "SPEAKING": "ACC", "THINKING": "ACC2",
                 "PROCESSING": "ACC2", "MUTED": "MUTED_C"}
@@ -1005,7 +1078,7 @@ class StateChip(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state = "INITIALISING"
-        self.setFixedSize(196, 34)
+        self.setFixedSize(148, 28)
 
     def set_state(self, state: str) -> None:
         state = str(state or "").upper()
@@ -1020,27 +1093,31 @@ class StateChip(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
         col = qcol(getattr(C, self._COLOURS.get(self._state, "PRI")))
-        p.setBrush(QBrush(blend(col, 0.10)))
-        p.setPen(QPen(blend(col, 0.55), 1))
-        p.drawPolygon(chamfer(QRectF(0.5, 0.5, W - 1, H - 1), 9, ("tl", "tr", "br", "bl")))
-        g = QRadialGradient(22, H / 2, 10)
-        g.setColorAt(0, with_alpha(col, 0.9))
-        g.setColorAt(1, with_alpha(col, 0.0))
+
+        # Neobrutalist hard drop shadow
+        p.fillRect(QRectF(2, 2, W - 2, H - 2), QColor(0, 0, 0, 180))
+
+        # Sharp badge face: 2px radius, 2px solid border, fast solid background
+        face = QRectF(0, 0, W - 2, H - 2)
+        p.setBrush(QBrush(QColor(14, 20, 30, 245)))
+        p.setPen(QPen(col, 2.0))
+        p.drawRoundedRect(face, 2, 2)
+
+        # Solid geometric indicator square (zero radial blur, fast raster)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(g))
-        p.drawEllipse(QPointF(22, H / 2), 10, 10)
         p.setBrush(QBrush(col))
-        p.drawEllipse(QPointF(22, H / 2), 3.5, 3.5)
-        p.setFont(px_font(12, QFont.Weight.DemiBold, spacing=2.6))
-        p.setPen(QPen(col))
-        p.drawText(QRectF(38, 0, W - 44, H), Qt.AlignmentFlag.AlignVCenter,
-                   p.fontMetrics().elidedText(self._state, Qt.TextElideMode.ElideRight, int(W - 44)))
+        p.drawRect(QRectF(8, (H - 2 - 8) / 2, 8, 8))
+
+        # Typography
+        p.setFont(px_font(9.5, QFont.Weight.Bold, mono=True, spacing=1.0))
+        p.setPen(QPen(qcol(C.WHITE)))
+        p.drawText(QRectF(22, 0, W - 26, H - 2), Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(self._state, Qt.TextElideMode.ElideRight, int(W - 26)))
         p.end()
 
 
 class HeaderBar(QWidget):
-    """The header's ground: a faint wash, and a bright rule along the bottom
-    that is brightest in the middle, under the state chip."""
+    """Frosted glass header ground with lit glass specular sheen."""
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -1048,22 +1125,18 @@ class HeaderBar(QWidget):
             return
         W, H = self.width(), self.height()
         g = QLinearGradient(0, 0, 0, H)
-        g.setColorAt(0, blend(C.PRI, 0.06))
-        g.setColorAt(1, qcol(C.BG))
+        g.setColorAt(0.0, QColor(20, 28, 42, 220))
+        g.setColorAt(1.0, QColor(10, 15, 24, 210))
         p.fillRect(self.rect(), QBrush(g))
-        lg = QLinearGradient(0, 0, W, 0)
-        lg.setColorAt(0.0, with_alpha(C.PRI, 0.05))
-        lg.setColorAt(0.5, with_alpha(C.PRI, 0.9))
-        lg.setColorAt(1.0, with_alpha(C.PRI, 0.05))
-        p.setPen(QPen(QBrush(lg), 1))
-        p.drawLine(QLineF(0, H - 1.5, W, H - 1.5))
-        p.setPen(QPen(qcol(C.PRI), 2))
-        p.drawLine(QLineF(W / 2 - 70, H - 1.5, W / 2 + 70, H - 1.5))
+        p.setPen(QPen(QColor(255, 255, 255, 45), 1.0))
+        p.drawLine(QLineF(0, 0.5, W, 0.5))
+        p.setPen(QPen(qcol(C.BORDER_A), 1.5))
+        p.drawLine(QLineF(0, H - 0.75, W, H - 0.75))
         p.end()
 
 
 class StatusStrip(QWidget):
-    """The footer: status dots with labels on the left, one line on the right."""
+    """Frosted glass footer with lit top border and neobrutalist status indicators."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1087,10 +1160,13 @@ class StatusStrip(QWidget):
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
-        p.fillRect(self.rect(), blend(C.PRI, 0.03))
-        p.setPen(QPen(blend(C.PRI, 0.2), 1))
-        p.drawLine(QLineF(0, 0.5, W, 0.5))
-        p.setFont(px_font(9.5, QFont.Weight.DemiBold, spacing=1.4))
+        g = QLinearGradient(0, 0, 0, H)
+        g.setColorAt(0.0, QColor(16, 23, 35, 215))
+        g.setColorAt(1.0, QColor(8, 12, 19, 235))
+        p.fillRect(self.rect(), QBrush(g))
+        p.setPen(QPen(qcol(C.BORDER_A), 1.5))
+        p.drawLine(QLineF(0, 0.75, W, 0.75))
+        p.setFont(px_font(9.5, QFont.Weight.Bold, mono=True, spacing=0.5))
         fm = p.fontMetrics()
         right_w = fm.horizontalAdvance(self._right) + 14
         x = 14.0
@@ -1100,10 +1176,10 @@ class StatusStrip(QWidget):
                 break
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(qcol(_pal(colour) or C.PRI)))
-            p.drawEllipse(QPointF(x + 3, H / 2), 2.6, 2.6)
+            p.drawRect(QRectF(x + 2, H / 2 - 2, 4, 4))
             p.setPen(QPen(qcol(C.TEXT_MED)))
-            p.drawText(QRectF(x + 11, 0, w + 4, H), Qt.AlignmentFlag.AlignVCenter, label)
-            x += w + 34
+            p.drawText(QRectF(x + 10, 0, w + 4, H), Qt.AlignmentFlag.AlignVCenter, label)
+            x += w + 24
         p.setPen(QPen(qcol(C.TEXT_DIM)))
         p.drawText(QRectF(0, 0, W - 14, H), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
                    self._right)
@@ -1119,11 +1195,11 @@ def _pal(colour):
 
 
 class CommandFrame(QWidget):
-    """The frame the command line sits in; it lights up while the line has focus."""
+    """Frosted glass command line capsule with lit glass focus highlight."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(40)
+        self.setFixedHeight(38)
         app = QApplication.instance()
         if app is not None:
             app.focusChanged.connect(self._on_focus)
@@ -1142,9 +1218,27 @@ class CommandFrame(QWidget):
         W, H = self.width(), self.height()
         fw = QApplication.focusWidget()
         focus = fw is not None and self.isAncestorOf(fw)
-        p.setBrush(QBrush(blend(C.PRI, 0.10 if focus else 0.06)))
-        p.setPen(QPen(blend(C.PRI, 0.95 if focus else 0.5), 1))
-        p.drawPolygon(chamfer(QRectF(0.5, 0.5, W - 1, H - 1), 8))
+
+        g = QLinearGradient(0, 0, 0, H)
+        if focus:
+            g.setColorAt(0.0, blend(C.PRI, 0.20, C.PANEL2))
+            g.setColorAt(1.0, blend(C.PRI, 0.08, C.PANEL))
+        else:
+            g.setColorAt(0.0, QColor(22, 32, 48, 190))
+            g.setColorAt(1.0, QColor(11, 16, 26, 210))
+
+        p.setBrush(QBrush(g))
+        p.setPen(QPen(qcol(C.PRI if focus else C.BORDER_A), 1.5))
+        p.drawRoundedRect(QRectF(0.75, 0.75, W - 1.5, H - 1.5), 8, 8)
+
+        # Specular glint
+        p.setPen(QPen(QColor(255, 255, 255, 75 if focus else 40), 1.0))
+        p.drawLine(QLineF(8, 1.5, W - 8, 1.5))
+
+        if focus:
+            p.setBrush(QBrush(qcol(C.PRI)))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(QRectF(1.5, 3, 3.5, H - 6), 1.5, 1.5)
         p.end()
 
 
@@ -1155,7 +1249,7 @@ class RoutineRow(QWidget):
 
     clicked = pyqtSignal(str)
     toggled = pyqtSignal(str, bool)
-    SWITCH_W = 30
+    SWITCH_W = 32
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1190,34 +1284,44 @@ class RoutineRow(QWidget):
         if not p.isActive() or not r:
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        W = self.width()
+        W, H = self.width(), self.height()
         on = bool(r.get("enabled"))
         col = qcol(C.GREEN if on else C.TEXT_DIM)
         if self.underMouse():
-            p.fillRect(self.rect(), blend(C.PRI, 0.08))
+            g = QLinearGradient(0, 0, 0, H)
+            g.setColorAt(0.0, QColor(24, 34, 52, 175))
+            g.setColorAt(1.0, QColor(13, 19, 29, 190))
+            p.setBrush(QBrush(g))
+            p.setPen(QPen(qcol(C.BORDER_A), 1))
+            p.drawRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 6, 6)
+            p.setPen(QPen(QColor(255, 255, 255, 45), 1))
+            p.drawLine(QLineF(6, 1.5, W - 6, 1.5))
 
+        # Status square indicator
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(col))
-        p.drawEllipse(QPointF(5, 11), 3, 3)
+        p.drawRect(QRectF(6, 11, 4, 4))
 
-        sx = W - self.SWITCH_W
-        p.setPen(QPen(blend(col, 0.75 if on else 0.45), 1))
-        p.setBrush(QBrush(blend(col, 0.22 if on else 0.05)))
-        p.drawRoundedRect(QRectF(sx + 0.5, 4.5, self.SWITCH_W - 1, 13), 6.5, 6.5)
+        # Neobrutalist glass toggle switch
+        sx = W - self.SWITCH_W - 6
+        p.setPen(QPen(col if on else qcol(C.BORDER_A), 1.5))
+        p.setBrush(QBrush(blend(col, 0.28 if on else 0.06, C.PANEL2)))
+        p.drawRoundedRect(QRectF(sx + 0.5, 9.5, self.SWITCH_W - 1, 15), 6, 6)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(col))
-        p.drawEllipse(QRectF(sx + self.SWITCH_W - 12 if on else sx + 3, 7, 9, 8))
+        p.setBrush(QBrush(col if on else qcol(C.TEXT_DIM)))
+        knob_x = sx + self.SWITCH_W - 14 if on else sx + 3
+        p.drawRoundedRect(QRectF(knob_x, 11.5, 9, 11), 3, 3)
 
-        p.setFont(px_font(11, QFont.Weight.DemiBold))
+        p.setFont(px_font(11, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.WHITE if on else C.TEXT_DIM)))
-        room = max(10, int(W - 14 - self.SWITCH_W - 8))
-        p.drawText(QRectF(14, 1, room, 20), Qt.AlignmentFlag.AlignVCenter,
+        room = max(10, int(W - 18 - self.SWITCH_W - 10))
+        p.drawText(QRectF(16, 2, room, 18), Qt.AlignmentFlag.AlignVCenter,
                    p.fontMetrics().elidedText(r.get("name") or "", Qt.TextElideMode.ElideRight, room))
 
-        p.setFont(px_font(10))
-        p.setPen(QPen(qcol(C.TEXT_DIM)))
-        p.drawText(QRectF(14, 21, W - 14, 16), Qt.AlignmentFlag.AlignVCenter,
-                   p.fontMetrics().elidedText(r.get("_when") or "", Qt.TextElideMode.ElideRight, int(W - 14)))
+        p.setFont(px_font(10, mono=True))
+        p.setPen(QPen(qcol(C.TEXT_MED)))
+        p.drawText(QRectF(16, 20, W - 18, 16), Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(r.get("_when") or "", Qt.TextElideMode.ElideRight, int(W - 18)))
         p.end()
 
 
@@ -1270,36 +1374,48 @@ class TaskRow(QWidget):
         W, H = self.width(), self.height()
         col = qcol(getattr(C, self._COLOURS.get(t["status"], "PRI")))
         if self.underMouse():
-            p.fillRect(self.rect(), blend(C.PRI, 0.08))
+            g = QLinearGradient(0, 0, 0, H)
+            g.setColorAt(0.0, QColor(24, 34, 52, 175))
+            g.setColorAt(1.0, QColor(13, 19, 29, 190))
+            p.setBrush(QBrush(g))
+            p.setPen(QPen(qcol(C.BORDER_A), 1))
+            p.drawRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 6, 6)
+            p.setPen(QPen(QColor(255, 255, 255, 45), 1))
+            p.drawLine(QLineF(6, 1.5, W - 6, 1.5))
+
+        # Status square indicator
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(col))
-        p.drawEllipse(QPointF(5, 10), 3, 3)
+        p.drawRect(QRectF(6, 11, 4, 4))
 
-        p.setFont(px_font(10, mono=True))
+        p.setFont(px_font(9.5, QFont.Weight.Bold, mono=True))
         state = self._state_text(t)
         sw = p.fontMetrics().horizontalAdvance(state) + 4
         p.setPen(QPen(col))
-        p.drawText(QRectF(W - sw, 1, sw, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, state)
+        p.drawText(QRectF(W - sw - 4, 2, sw, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, state)
 
-        p.setFont(px_font(11, QFont.Weight.DemiBold))
+        p.setFont(px_font(11, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.WHITE)))
-        room = max(10, int(W - 16 - sw - 6))
-        p.drawText(QRectF(14, 1, room, 18), Qt.AlignmentFlag.AlignVCenter,
+        room = max(10, int(W - 20 - sw - 6))
+        p.drawText(QRectF(16, 2, room, 18), Qt.AlignmentFlag.AlignVCenter,
                    p.fontMetrics().elidedText(t.get("title") or "", Qt.TextElideMode.ElideRight, room))
 
         budget = max(1.0, t["budget"]["minutes"] * 60.0)
         frac = 1.0 if t["status"] == "done" else min(1.0, t["used"]["seconds"] / budget)
-        p.fillRect(QRectF(14, 22, W - 14, 3), blend(C.PRI, 0.12))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(qcol(C.BAR_BG)))
+        p.drawRoundedRect(QRectF(16, 22, W - 20, 3), 1.5, 1.5)
         if frac > 0:
-            p.fillRect(QRectF(14, 22, (W - 14) * frac, 3), col)
+            p.setBrush(QBrush(col))
+            p.drawRoundedRect(QRectF(16, 22, (W - 20) * frac, 3), 1.5, 1.5)
 
         last = ""
         for ev in reversed(t.get("events") or []):
             if ev.get("kind") in ("progress", "tool", "note", "finding") or t["status"] in ("failed", "waiting_quota"):
                 last = ev.get("text") or ""
                 break
-        p.setFont(px_font(10))
-        p.setPen(QPen(qcol(C.TEXT_DIM)))
-        p.drawText(QRectF(14, 27, W - 14, 16), Qt.AlignmentFlag.AlignVCenter,
-                   p.fontMetrics().elidedText(last, Qt.TextElideMode.ElideRight, int(W - 14)))
+        p.setFont(px_font(10, mono=True))
+        p.setPen(QPen(qcol(C.TEXT_MED)))
+        p.drawText(QRectF(16, 27, W - 20, 16), Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(last, Qt.TextElideMode.ElideRight, int(W - 20)))
         p.end()

@@ -47,6 +47,26 @@ def _clean_code(text: str) -> str:
 
 
 def _resolve_save_path(output_path: str, language: str) -> Path:
+    from memory.config_manager import get_engineering_mode
+    if get_engineering_mode():
+        from core.repository.workspace import get_workspace
+        ws = get_workspace()
+        if not ws.root:
+            raise ValueError("Engineering mode requires an active repository root.")
+        if output_path:
+            return ws.resolve_safe_path(output_path, must_exist=False)
+        ext_map = {
+            "python": ".py", "py": ".py",
+            "javascript": ".js", "js": ".js",
+            "typescript": ".ts", "ts": ".ts",
+            "html": ".html", "css": ".css",
+            "java": ".java", "cpp": ".cpp", "c": ".c",
+            "bash": ".sh", "shell": ".sh", "powershell": ".ps1",
+            "sql": ".sql", "json": ".json", "rust": ".rs", "go": ".go",
+        }
+        ext = ext_map.get((language or "python").lower(), ".py")
+        return ws.resolve_safe_path(f"code_output{ext}", must_exist=False)
+
     ext_map = {
         "python": ".py", "py": ".py",
         "javascript": ".js", "js": ".js",
@@ -66,6 +86,17 @@ def _resolve_save_path(output_path: str, language: str) -> Path:
 def _read_file(file_path: str) -> tuple[str, str]:
     if not file_path:
         return "", "No file path provided."
+    from memory.config_manager import get_engineering_mode
+    if get_engineering_mode():
+        from core.repository.workspace import get_workspace, WorkspaceError
+        try:
+            p = get_workspace().resolve_safe_path(file_path, must_exist=True, require_file=True)
+            return p.read_text(encoding="utf-8"), ""
+        except WorkspaceError as e:
+            return "", str(e)
+        except Exception as e:
+            return "", f"Could not read file: {e}"
+
     p = Path(file_path)
     if not p.exists():
         return "", f"File not found: {file_path}"
@@ -76,6 +107,21 @@ def _read_file(file_path: str) -> tuple[str, str]:
 
 
 def _save_file(path: Path, content: str) -> str:
+    from memory.config_manager import get_engineering_mode
+    if get_engineering_mode():
+        from core.repository.workspace import get_workspace
+        from core.repository.patches import get_patch_manager
+        ws = get_workspace()
+        try:
+            safe_p = ws.resolve_safe_path(path, must_exist=False)
+            if safe_p.exists():
+                get_patch_manager().create_file(str(safe_p), content, auto_approve=True)
+            else:
+                ws.write_file_text(safe_p, content, overwrite=True)
+            return f"Saved to workspace: {safe_p.relative_to(ws.root)}"
+        except Exception as e:
+            return f"Could not save in workspace: {e}"
+
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -168,14 +214,16 @@ def _write(description: str, language: str, output_path: str, player=None) -> tu
     lang  = language or "python"
     model = _get_gemini()
 
-    prompt = f"""You are an expert {lang} developer.
-Write clean, working, well-commented {lang} code for the description below.
+    prompt = f"""You are S.Y.N.C, an AI assistant built for software developers.
+Write polished, cleanly organized, production-grade, and well-commented {lang} code for the description below. Never write messy code that just barely works.
 
 Rules:
 - Output ONLY the code. No explanation, no markdown, no backticks.
-- Add helpful inline comments.
-- Handle errors and edge cases properly.
-- Use modern best practices.
+- Match modern {lang} style, version, idioms, and dependencies. Never suggest a rewrite when a small fix works.
+- Keep code readable and highly organized: clear names, small single-purpose functions, comprehensive docstrings, and comments that explain why decisions were made, not just what the code does.
+- Handle errors and edge cases (empty, null, large input, concurrency) properly. Clean up resources.
+- Security by default: validate and sanitize input, never hardcode secrets, avoid risky patterns (eval, unsafe deserialization).
+- Prefer simple solutions. Do not over-engineer or add unrequested abstractions.
 
 Description: {description}
 
@@ -190,8 +238,11 @@ Code:"""
 
 def _fix_code(code: str, error_output: str, description: str) -> str:
     model  = _get_gemini()
-    prompt = f"""You are an expert debugger.
-The code below failed with the following error. Fix it.
+    prompt = f"""You are S.Y.N.C, an AI assistant built for software developers and debugging.
+The code below failed with the following error. Fix it following the debugging process:
+1. Isolate the root cause.
+2. Apply the minimal focused fix that solves the problem. Never rewrite code when a small fix works.
+3. Handle edge cases and preserve existing behavior.
 Return ONLY the corrected code — no explanation, no markdown, no backticks.
 
 Original goal: {description}
@@ -222,12 +273,20 @@ def _run_file(path: Path, args: list, timeout: int) -> str:
     if not interp:
         return f"No interpreter for {path.suffix}."
 
+    from memory.config_manager import get_engineering_mode
+    run_cwd = str(path.parent)
+    if get_engineering_mode():
+        from core.repository.workspace import get_workspace
+        ws_root = get_workspace().root
+        if ws_root:
+            run_cwd = str(ws_root)
+
     try:
         result = subprocess.run(
             interp + [str(path)] + (args or []),
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
-            timeout=timeout, cwd=str(path.parent)
+            timeout=timeout, cwd=run_cwd
         )
         output = result.stdout.strip()
         error  = result.stderr.strip()
@@ -358,9 +417,11 @@ def _explain_action(file_path, code, player) -> str:
         player.write_log("[Code] Analyzing code...")
 
     model  = _get_gemini()
-    prompt = f"""Explain what this code does in simple, clear language.
-Focus on: what it does, how it works, and any important details.
-Be concise — 3 to 6 sentences maximum.
+    prompt = f"""You are S.Y.N.C, an AI assistant built for software developers specializing in development fundamentals.
+Explain what this code does in clear, concise language.
+Teach the "why" before the "how". If a pattern or issue comes from a fundamentals gap (data structures, algorithms, memory, concurrency, architecture), name the gap and explain it briefly.
+Focus on: what it does, how it works, and key trade-offs.
+Lead with the answer, then the explanation. No filler.
 
 Code:
 {code[:4000]}
@@ -400,12 +461,12 @@ def _optimize_action(file_path, code, language, output_path, player) -> str:
     lang  = language or "python"
     model = _get_gemini()
 
-    prompt = f"""You are an expert {lang} developer and code reviewer.
-Optimize the following code for:
-1. Performance — eliminate unnecessary operations, use efficient data structures
-2. Readability — clear variable names, proper formatting, logical structure
-3. Best practices — modern {lang} patterns, error handling, type hints if applicable
-4. Remove dead code, redundant comments, and unnecessary complexity
+    prompt = f"""You are S.Y.N.C, an AI assistant built for software developers and code review.
+Optimize the following code according to engineering fundamentals:
+1. Correctness & Efficiency — eliminate unnecessary operations, choose appropriate data structures and algorithms.
+2. Readability — clear names, small single-purpose structure, comments explaining why, not what.
+3. Robustness & Security — handle errors and edge cases (empty, null, concurrency), clean up resources, sanitize inputs.
+4. Simplicity — prefer simple solutions; avoid over-engineering or unrequested abstractions; remove dead code.
 
 Return ONLY the optimized code — no explanation, no markdown, no backticks.
 

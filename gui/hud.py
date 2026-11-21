@@ -1,6 +1,6 @@
 """gui/hud.py — The centre of the HUD: the avatar or the reactor core, the state line and the waveform.
 
-Split out of ui.py in Mark LVII; behaviour unchanged."""
+Split out of ui.py in S.Y.N.C; behaviour unchanged."""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,6 @@ from PyQt6.QtWidgets import (
 
 from gui.theme import (
     C,
-    HoloAvatar,
     qcol,
 )
 
@@ -59,14 +58,8 @@ class HudCanvas(QWidget):
         self.state    = "INITIALISING"
         self._assistant_name = assistant_name
 
-        # The holographic head that fills the HUD. If it could not be imported
-        # we fall back to the old glowing core so the panel is never empty.
+        # The animated face has been removed; HUD is locked to the reactor core.
         self._avatar = None
-        if HoloAvatar is not None:
-            try:
-                self._avatar = HoloAvatar()
-            except Exception:
-                self._avatar = None
 
         # The reactor core in three dimensions (gui/reactor.py). The flat ring
         # stack it replaced is kept whole as _paint_core_classic, and it is
@@ -78,14 +71,7 @@ class HudCanvas(QWidget):
             except Exception:
                 self._reactor = None
 
-        # Which centrepiece to draw. Read once here and changed live by the
-        # settings toggle; the avatar object is kept either way so switching
-        # back is instant and costs no reload.
-        try:
-            from memory.config_manager import get_hud_style
-            self.hud_style = get_hud_style()
-        except Exception:
-            self.hud_style = "face"
+        self.hud_style = "core"
         self._core_phase = 0.0
 
         self._tick       = 0
@@ -124,12 +110,8 @@ class HudCanvas(QWidget):
         self._tmr.start(16)
 
     def glance(self, dx: float, dy: float, hold: float = 1.1) -> None:
-        """Ask the avatar to look somewhere for a moment (see HoloAvatar.glance)."""
-        try:
-            if self._avatar is not None:
-                self._avatar.glance(dx, dy, hold)
-        except Exception:
-            pass
+        """Glance target (kept for API compatibility)."""
+        pass
 
     def push_visemes(self, frames, hop: float, at: float) -> None:
         """Thread-safe: hand over a schedule of (level, openness, width) frames.
@@ -336,41 +318,34 @@ class HudCanvas(QWidget):
         # starts talking. Same lesson the head's sway taught.
         self._core_phase += min(0.10, max(0.0, dt))
 
-        if self._avatar is not None and self.hud_style == "face":
-            self._avatar.step(dt, amp, speaking=self.speaking,
-                              muted=self.muted, state=self.state,
-                              v_open=v_open, v_wide=v_wide or 0.0,
-                              v_level=v_level, v_seq=v_seq,
-                              v_hop=(sched[2] if sched is not None else 0.02))
-        else:
-            if self._reactor is not None:
-                self._reactor.step(dt, self.speaking,
-                                   self.state in ("THINKING", "PROCESSING"), self.muted)
-            # Fallback core: slow "breathing" base target, lifted by the level.
-            if now - self._last_t > (0.12 if self.speaking else 0.5):
-                if self.speaking:
-                    self._base_scale = 1.03
-                    self._base_halo  = 122.0
-                elif self.muted:
-                    self._base_scale = random.uniform(0.998, 1.002)
-                    self._base_halo  = random.uniform(15, 28)
-                else:
-                    self._base_scale = random.uniform(1.001, 1.008)
-                    self._base_halo  = random.uniform(48, 68)
-                self._last_t = now
-
-            if self.muted:
-                self._tgt_scale, self._tgt_halo = self._base_scale, self._base_halo
-            elif self.speaking:
-                self._tgt_scale = self._base_scale + amp * 0.13
-                self._tgt_halo  = self._base_halo  + amp * 95.0
+        if self._reactor is not None:
+            self._reactor.step(dt, self.speaking,
+                               self.state in ("THINKING", "PROCESSING"), self.muted)
+        # Fallback core: slow "breathing" base target, lifted by the level.
+        if now - self._last_t > (0.12 if self.speaking else 0.5):
+            if self.speaking:
+                self._base_scale = 1.03
+                self._base_halo  = 122.0
+            elif self.muted:
+                self._base_scale = random.uniform(0.998, 1.002)
+                self._base_halo  = random.uniform(15, 28)
             else:
-                self._tgt_scale = self._base_scale + amp * 0.06
-                self._tgt_halo  = self._base_halo  + amp * 75.0
+                self._base_scale = random.uniform(1.001, 1.008)
+                self._base_halo  = random.uniform(48, 68)
+            self._last_t = now
 
-            sp = 0.38 if self.speaking else (0.30 if amp > 0.02 else 0.15)
-            self._scale += (self._tgt_scale - self._scale) * sp
-            self._halo  += (self._tgt_halo  - self._halo)  * sp
+        if self.muted:
+            self._tgt_scale, self._tgt_halo = self._base_scale, self._base_halo
+        elif self.speaking:
+            self._tgt_scale = self._base_scale + amp * 0.13
+            self._tgt_halo  = self._base_halo  + amp * 95.0
+        else:
+            self._tgt_scale = self._base_scale + amp * 0.06
+            self._tgt_halo  = self._base_halo  + amp * 75.0
+
+        sp = 0.38 if self.speaking else (0.30 if amp > 0.02 else 0.15)
+        self._scale += (self._tgt_scale - self._scale) * sp
+        self._halo  += (self._tgt_halo  - self._halo)  * sp
 
         self._blink_tick += 1
         if self._blink_tick >= 38:
@@ -610,23 +585,7 @@ class HudCanvas(QWidget):
         band_t = 30.0
         band_h = max(60.0, sy - 14.0 - band_t)
 
-        if self._avatar is not None and self.hud_style == "face":
-            r_head = min(fw * 0.355, band_h / (self._avatar.SPAN + 0.08))
-            head_cy = band_t + (band_h - self._avatar.SPAN * r_head) / 2.0 + r_head
-            if self.muted:
-                main = acc = qcol(C.MUTED_C)
-            else:
-                main = qcol(C.PRI)
-                if self.speaking:
-                    acc = qcol(C.ACC)
-                elif self.state in ("THINKING", "PROCESSING"):
-                    acc = qcol(C.ACC2)
-                elif self.state == "LISTENING":
-                    acc = qcol(C.GREEN)
-                else:
-                    acc = qcol(C.PRI)
-            self._avatar.paint(p, cx, head_cy, r_head, main, acc, qcol(C.BG))
-        elif self._reactor is not None:
+        if self._reactor is not None:
             ext = Reactor3D.TOP + Reactor3D.BOTTOM
             r = min(W * 0.25, band_h / ext)
             core_cy = band_t + (band_h - ext * r) / 2.0 + Reactor3D.TOP * r
@@ -651,7 +610,7 @@ class HudCanvas(QWidget):
         p.setPen(QPen(col))
         p.drawText(QRectF(0, sy, W, 22), Qt.AlignmentFlag.AlignCenter, txt)
         pulse = 0.85 if (self._blink or self.speaking or self.muted) else 0.40
-        rule = min(110.0, W * 0.12)
+        rule = min(150.0, W * 0.15)
         for sgn in (-1, 1):
             x0 = cx + sgn * (tw / 2 + 14)
             lg = QLinearGradient(x0, 0, x0 + sgn * rule, 0)
@@ -664,7 +623,7 @@ class HudCanvas(QWidget):
         # while speaking), mirrored below its baseline like a reflection
         wy = sy + 50
         N = 48
-        span = min(W * 0.60, 420.0)
+        span = min(W * 0.72, 640.0)
         bw = span / N
         amp = self._amp_disp
         mid = (N - 1) / 2.0

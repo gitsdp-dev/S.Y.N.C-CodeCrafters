@@ -96,6 +96,81 @@ def _opt_text(value) -> Optional[str]:
     return text or None
 
 
+PROFILE_DEFAULT = "default"
+PROFILE_ENGINEERING = "engineering"
+
+# Explicit set of allowed actions in software engineering mode
+ENGINEERING_ALLOWED_ACTIONS: set[str] = {
+    # Core repository operations
+    "list_files",
+    "read_file",
+    "read_range",
+    "search_text",
+    "find_symbol",
+    "find_references",
+    "inspect_dependencies",
+    "get_repository_summary",
+    # Patch and file editing operations
+    "apply_patch",
+    "preview_patch",
+    "rollback_patch",
+    "create_file",
+    "rename_file",
+    "delete_file",
+    # Validation and diagnostics
+    "run_tests",
+    "run_linter",
+    "run_formatter",
+    "run_type_checker",
+    "run_build",
+    "collect_diagnostics",
+    # Version control operations
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_branch",
+    "git_commit",
+    "git_push",
+    "execute_command",
+    "write_ide_terminal",
+    "execute_ide_terminal",
+    # Real-time IDE and Workspace operations
+    "add_workspace_folder",
+    "choose_ide",
+    "list_available_ides",
+    "get_code_audit",
+    # Preserved engineering capabilities
+    "dev_agent",
+    "code_helper",
+    "file_processor",
+    "web_search",
+    # Safe inline session tools
+    "system_status",
+    "undo",
+    "screen_process",
+    "close_camera",
+}
+
+ENGINEERING_DISABLED_ACTIONS: set[str] = {
+    "weather_report",
+    "send_message",
+    "video_player",
+    "youtube_video",
+    "game_updater",
+    "flight_finder",
+    "desktop",
+    "computer_control",
+    "computer_settings",
+    "routines",
+    "proactive",
+    "background_monitor",
+    "background_tasks",
+    "open_app",
+    "reminder",
+    "save_memory",
+}
+
+
 @dataclass
 class ActionRecord:
     name: str
@@ -123,11 +198,38 @@ class ActionRegistry:
         self._actions = actions          # name -> ActionRecord, VALID entries only
         self._all_records: list[ActionRecord] = []
         self._logger = logger
+        self._active_profile: Optional[str] = None
+
+    def set_profile(self, profile: Optional[str]) -> None:
+        """Set the active tool profile ('default' or 'engineering' or None to use config)."""
+        self._active_profile = profile
+
+    def get_profile(self) -> str:
+        """Return the active profile name."""
+        if self._active_profile is not None:
+            return self._active_profile
+        try:
+            from memory import config_manager
+            if config_manager.get_engineering_mode():
+                return PROFILE_ENGINEERING
+        except Exception:
+            pass
+        return PROFILE_DEFAULT
+
+    def register_action(self, rec: ActionRecord) -> None:
+        """Register or update an ActionRecord dynamically."""
+        if rec.valid:
+            self._actions[rec.name] = rec
+        self._all_records.append(rec)
 
     # -- called by main.py at LiveConnectConfig build time --
-    def get_tool_declarations(self) -> list[dict]:
+    def get_tool_declarations(self, profile: Optional[str] = None) -> list[dict]:
+        prof = profile or self.get_profile()
+        is_engineering = (prof == PROFILE_ENGINEERING)
         out = []
         for rec in self._actions.values():
+            if is_engineering and rec.name not in ENGINEERING_ALLOWED_ACTIONS:
+                continue
             decl = {"name": rec.name, "description": rec.description,
                     "parameters": rec.parameters}
             if rec.behavior:
@@ -142,7 +244,10 @@ class ActionRegistry:
             out.append(decl)
         return out
 
-    def has(self, name: str) -> bool:
+    def has(self, name: str, profile: Optional[str] = None) -> bool:
+        prof = profile or self.get_profile()
+        if prof == PROFILE_ENGINEERING:
+            return name in self._actions and name in ENGINEERING_ALLOWED_ACTIONS
         return name in self._actions
 
     def scheduling(self, name: str) -> Optional[str]:
@@ -150,11 +255,17 @@ class ActionRegistry:
         rec = self._actions.get(name)
         return rec.scheduling if rec else None
 
-    def names(self) -> set[str]:
+    def names(self, profile: Optional[str] = None) -> set[str]:
+        prof = profile or self.get_profile()
+        if prof == PROFILE_ENGINEERING:
+            return set(self._actions.keys()) & ENGINEERING_ALLOWED_ACTIONS
         return set(self._actions.keys())
 
     # -- called by main.py from _execute_tool --
     def run(self, name: str, parameters: dict, ctx: dict | None = None) -> str:
+        prof = self.get_profile()
+        if prof == PROFILE_ENGINEERING and name not in ENGINEERING_ALLOWED_ACTIONS:
+            return f"Action '{name}' is disabled in engineering mode."
         rec = self._actions.get(name)
         if rec is None or not rec.valid:
             return f"Action '{name}' is not available."
@@ -179,12 +290,11 @@ def _call_handler(fn: Callable, parameters: dict, ctx: dict) -> str:
     return fn(parameters=parameters, **kwargs)
 
 
-def _validate(module, filename: str) -> ActionRecord:
-    """Returns an ActionRecord; .valid=False + .error set on any problem. Never raises."""
-    tool = getattr(module, "TOOL", None)
+def _validate_tool(tool: dict, filename: str) -> ActionRecord:
+    """Returns an ActionRecord for a tool dict; .valid=False + .error set on any problem."""
     if not isinstance(tool, dict):
         return ActionRecord(name=Path(filename).stem, file=filename,
-                            error="No module-level TOOL dict (not a discoverable action).")
+                            error="Invalid tool declaration (not a dict).")
 
     name = tool.get("name")
     if not isinstance(name, str) or not _NAME_RE.match(name):
@@ -214,12 +324,21 @@ def _validate(module, filename: str) -> ActionRecord:
                         brief=_opt_text(tool.get("brief")))
 
 
+def _validate(module, filename: str) -> ActionRecord:
+    """Backwards-compatible module-level validator for TOOL dict."""
+    tool = getattr(module, "TOOL", None)
+    if not isinstance(tool, dict):
+        return ActionRecord(name=Path(filename).stem, file=filename,
+                            error="No module-level TOOL dict (not a discoverable action).")
+    return _validate_tool(tool, filename)
+
+
 def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                      logger: Callable[[str], None] = print) -> ActionRegistry:
     """
     Scans actions_dir for *.py files (skips files starting with '_'). A file is
-    only treated as an action if it exposes a module-level TOOL dict; files
-    without one (shared helpers, capture-only modules) are silently ignored.
+    only treated as an action if it exposes a module-level TOOL dict or TOOLS list;
+    files without either are silently ignored.
     Import/validation errors and name collisions are logged and the file is
     skipped — they NEVER raise out of this function.
     """
@@ -249,30 +368,37 @@ def discover_actions(actions_dir: Path, reserved_names: set[str] | None = None,
                     sys.modules.pop(module_name, None)
                     raise
 
-            if getattr(module, "TOOL", None) is None:
+            tools_list = getattr(module, "TOOLS", None)
+            if tools_list is None:
+                single_tool = getattr(module, "TOOL", None)
+                tools_list = [single_tool] if single_tool is not None else []
+
+            if not tools_list:
                 continue   # not an action file — a helper/capture-only module
 
-            rec = _validate(module, path.name)
+            for tool_item in tools_list:
+                rec = _validate_tool(tool_item, path.name)
 
-            if rec.valid and rec.name in reserved:
-                rec = ActionRecord(name=rec.name, file=path.name,
-                                   error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
-            elif rec.valid and rec.name in valid:
-                other = valid[rec.name].file
-                rec = ActionRecord(name=rec.name, file=path.name,
-                                   error=f"Name '{rec.name}' already used by action '{other}' — rejected.")
+                if rec.valid and rec.name in reserved:
+                    rec = ActionRecord(name=rec.name, file=path.name,
+                                       error=f"Name '{rec.name}' collides with a reserved core tool — rejected.")
+                elif rec.valid and rec.name in valid:
+                    other = valid[rec.name].file
+                    rec = ActionRecord(name=rec.name, file=path.name,
+                                       error=f"Name '{rec.name}' already used by action '{other}' — rejected.")
+
+                all_records.append(rec)
+                if rec.valid:
+                    valid[rec.name] = rec
+                    logger(f"Action loaded: {rec.name} ({path.name})")
+                else:
+                    logger(f"Action rejected: {path.name} ({rec.name}) — {rec.error}")
 
         except Exception as e:
             rec = ActionRecord(name=path.stem, file=path.name,
                                error=f"Failed to load: {e}")
             traceback.print_exc()
-
-        all_records.append(rec)
-        if rec.valid:
-            valid[rec.name] = rec
-            logger(f"Action loaded: {rec.name} ({path.name})")
-        else:
-            # Only log a rejection if the file actually tried to be an action.
+            all_records.append(rec)
             logger(f"Action rejected: {path.name} — {rec.error}")
 
     registry = ActionRegistry(valid, logger)

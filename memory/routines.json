@@ -13,7 +13,7 @@
    },
    "options": {
     "news": true,
-    "news_topic": "top world news today",
+    "news_topic": "top developer and tech news",
     "extra": ""
    },
    "deliver": "voice",
@@ -25,8 +25,8 @@
    "source": "",
    "created": 1794910987.5582976,
    "next_ts": 0.0,
-   "last_run": 1794977986.9952788,
-   "runs": 6,
+   "last_run": 1795230030.9576342,
+   "runs": 27,
    "last_result": "ran"
   },
   {
@@ -84,10 +84,10 @@
    "enabled": true,
    "source": "",
    "created": 1794910987.5612903,
-   "next_ts": 1794979800.0,
-   "last_run": 1794978007.0261295,
-   "runs": 1,
-   "last_result": "ran"
+   "next_ts": 1795231800.0,
+   "last_run": 1795172685.8271253,
+   "runs": 6,
+   "last_result": "skipped: missed by 930 min"
   }
  ],
  "seeded": true

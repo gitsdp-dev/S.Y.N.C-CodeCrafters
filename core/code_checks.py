@@ -54,7 +54,7 @@ _GUIDE_CHARS = 40_000
 _HARNESS = Path(__file__).with_name("_smoke_harness.py")
 _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
               "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build",
-              ".idea", ".vscode", ".next", "target", ".jarvis_backup"}
+              ".idea", ".vscode", ".next", "target", ".jarvis_backup", ".sync_backup"}
 _TEST_TIMEOUT = 180
 
 
